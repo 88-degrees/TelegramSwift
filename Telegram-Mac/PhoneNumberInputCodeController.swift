@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 
 private final class ConfirmCodeArguments {
@@ -60,7 +61,7 @@ class PhoneNumberInputCodeView : View, NSTextFieldDelegate {
         
         codeText.delegate = self
         
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
     }
     
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -120,8 +121,8 @@ class PhoneNumberInputCodeView : View, NSTextFieldDelegate {
         super.draw(layer, in: ctx)
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
         yourCodeField.backgroundColor = theme.colors.grayBackground
         sentCodeField.backgroundColor = theme.colors.grayBackground
         callField.backgroundColor = theme.colors.grayBackground

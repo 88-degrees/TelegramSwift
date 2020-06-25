@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
 
 class ChatMusicContentView: ChatAudioContentView {
@@ -73,15 +74,13 @@ class ChatMusicContentView: ChatAudioContentView {
         imageView.layer?.contents = theme.icons.chatMusicPlaceholder
 
         
-        let image = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [TelegramMediaImageRepresentation(dimensions: iconSize, resource: resource)], immediateThumbnailData: nil, reference: nil, partialReference: nil)
+        let image = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [TelegramMediaImageRepresentation(dimensions: PixelDimensions(iconSize), resource: resource)], immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
         
         imageView.setSignal(signal: cachedMedia(media: media, arguments: arguments, scale: backingScaleFactor, positionFlags: positionFlags), clearInstantly: false)
         
-        imageView.setSignal( chatMessagePhotoThumbnail(account: context.account, imageReference: parent != nil ? ImageMediaReference.message(message: MessageReference(parent!), media: image) : ImageMediaReference.standalone(media: image)), animate: true, cacheImage: { [weak self] image in
-            if let strongSelf = self {
-                return cacheMedia(signal: image, media: media, arguments: arguments, scale: strongSelf.backingScaleFactor, positionFlags: positionFlags)
-            } else {
-                return .complete()
+        imageView.setSignal( chatMessagePhotoThumbnail(account: context.account, imageReference: parent != nil ? ImageMediaReference.message(message: MessageReference(parent!), media: image) : ImageMediaReference.standalone(media: image)), animate: true, cacheImage: { [weak media] result in
+            if let media = media {
+                cacheMedia(result, media: media, arguments: arguments, scale: System.backingScale, positionFlags: positionFlags)
             }
         })
         
@@ -119,7 +118,7 @@ class ChatMusicContentView: ChatAudioContentView {
         if let context = context {
             if let media = media as? TelegramMediaFile {
                 let reference = parent != nil ? FileMediaReference.message(message: MessageReference(parent!), media: media) : FileMediaReference.standalone(media: media)
-                partHeaderDisposable.set(fetchedMediaResource(postbox: context.account.postbox, reference: reference.resourceReference(media.resource), range: (0 ..< 500 * 1024, .default), statsCategory: .audio).start())
+                partHeaderDisposable.set(fetchedMediaResource(mediaBox: context.account.postbox.mediaBox, reference: reference.resourceReference(media.resource), range: (0 ..< 500 * 1024, .default), statsCategory: .audio).start())
                 
             }
         }
@@ -131,7 +130,7 @@ class ChatMusicContentView: ChatAudioContentView {
     
     override func layout() {
         super.layout()
-        let center = floorToScreenPixels(scaleFactor: backingScaleFactor, frame.height / 2.0)
+        let center = floorToScreenPixels(backingScaleFactor, frame.height / 2.0)
         textView.setFrameOrigin(leftInset, center - textView.frame.height - 2)
         durationView.setFrameOrigin(leftInset, center + 2)
     }

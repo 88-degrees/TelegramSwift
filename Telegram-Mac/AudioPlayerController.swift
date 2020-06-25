@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
 import AVKit
 
@@ -167,12 +168,12 @@ class APSongItem : APItem {
                 if let t = t {
                     songName = t
                 } else {
-                    songName = tr(L10n.audioUntitledSong)
+                    songName = p != nil ? L10n.audioUntitledSong : ""
                 }
                 if let p = p {
                     performerName = p
                 } else {
-                    performerName = tr(L10n.audioUnknownArtist)
+                    performerName = file.fileName ?? L10n.audioUnknownArtist
                 }
             }
 
@@ -216,7 +217,7 @@ class APSongItem : APItem {
     }
 
     private func fetch() {
-        fetchDisposable.set(fetchedMediaResource(postbox: account.postbox, reference: reference).start())
+        fetchDisposable.set(fetchedMediaResource(mediaBox: account.postbox.mediaBox, reference: reference).start())
     }
 
     private func cancelFetching() {
@@ -410,7 +411,7 @@ class APController : NSResponder {
     
     fileprivate(set) var needRepeat:Bool = false
 
-    fileprivate var timer:SwiftSignalKitMac.Timer?
+    fileprivate var timer:SwiftSignalKit.Timer?
 
     fileprivate var prevNextDisposable = DisposableSet()
 
@@ -772,10 +773,10 @@ class APController : NSResponder {
                             let previous = index - 1
                             let next = index + 1
                             if previous >= 0 {
-                                strongSelf.prevNextDisposable.add(fetchedMediaResource(postbox: strongSelf.account.postbox, reference: items[previous].reference, statsCategory: .audio).start())
+                                strongSelf.prevNextDisposable.add(fetchedMediaResource(mediaBox: strongSelf.account.postbox.mediaBox, reference: items[previous].reference, statsCategory: .audio).start())
                             }
                             if next < items.count {
-                                strongSelf.prevNextDisposable.add(fetchedMediaResource(postbox: strongSelf.account.postbox, reference: items[next].reference, statsCategory: .audio).start())
+                                strongSelf.prevNextDisposable.add(fetchedMediaResource(mediaBox: strongSelf.account.postbox.mediaBox, reference: items[next].reference, statsCategory: .audio).start())
                             }
                         }
                         
@@ -886,7 +887,7 @@ class APController : NSResponder {
     private func startTimer() {
         var additional: Double = 0.2
         let duration: TimeInterval = 0.2
-        timer = SwiftSignalKitMac.Timer(timeout: duration, repeat: true, completion: { [weak self] in
+        timer = SwiftSignalKit.Timer(timeout: duration, repeat: true, completion: { [weak self] in
             if let `self` = self, let item = self.song {
                 let new = item.status.timestamp + additional * item.status.baseRate
                 item.state = .playing(current: new, duration: item.status.duration, progress: new / max((item.status.duration), 0.2), animated: true)

@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 struct SelectContainer {
     let text:NSAttributedString
     let range:NSRange
@@ -18,7 +19,7 @@ struct SelectContainer {
 }
 
 class SelectManager : NSResponder {
-    
+    fileprivate weak var chatInteraction: ChatInteraction?
     override init() {
         super.init()
     }
@@ -81,10 +82,32 @@ class SelectManager : NSResponder {
     
     @objc func copy(_ sender:Any) {
         let selectedText = self.selectedText
-        if !globalLinkExecutor.copyAttributedString(selectedText) {
-            NSPasteboard.general.declareTypes([.string], owner: self)
-            NSPasteboard.general.setString(selectedText.string, forType: .string)
+        if !selectedText.string.isEmpty {
+            if !globalLinkExecutor.copyAttributedString(selectedText) {
+                NSPasteboard.general.declareTypes([.string], owner: self)
+                NSPasteboard.general.setString(selectedText.string, forType: .string)
+            }
+        } else if let chatInteraction = self.chatInteraction {
+            if let selectionState = chatInteraction.presentation.selectionState {
+                _ = chatInteraction.context.account.postbox.messagesAtIds(Array(selectionState.selectedIds.sorted(by: <))).start(next: { messages in
+                    var text: String = ""
+                    for message in messages {
+                        if !text.isEmpty {
+                            text += "\n\n"
+                        }
+                        if let forwardInfo = message.forwardInfo {
+                            text += "> " + forwardInfo.authorTitle + ":"
+                        } else {
+                            text += "> " + (message.effectiveAuthor?.displayTitle ?? "") + ":"
+                        }
+                        text += "\n"
+                        text += pullText(from: message) as String
+                    }
+                    copyToClipboard(text)
+                })
+            }
         }
+        
     }
     
     func selectNextChar() -> Bool {
@@ -191,14 +214,22 @@ class ChatSelectText : NSObject {
     private var startMessageId:MessageId? = nil
     private var lastPressureEventStage = 0
     private var inPressedState = false
+    private var locationInWindow: NSPoint? = nil
+    
+    private var lastSelectdMessageId: MessageId?
     
     init(_ table:TableView) {
         self.table = table
     }
     
-    
+    deinit {
+        var bp:Int = 0
+        bp += 1
+    }
     
     func initializeHandlers(for window:Window, chatInteraction:ChatInteraction) {
+        
+        selectManager.chatInteraction = chatInteraction
         
         table.addScroll(listener: TableScrollListener (dispatchWhenVisibleRangeUpdated: false, { [weak table] _ in
             table?.enumerateVisibleViews(with: { view in
@@ -219,6 +250,7 @@ class ChatSelectText : NSObject {
             
             self?.started = false
             self?.inPressedState = false
+            self?.locationInWindow = event.locationInWindow
             
             if let table = self?.table, let superview = table.superview, let documentView = table.documentView {
                 let point = superview.convert(event.locationInWindow, from: nil)
@@ -243,8 +275,7 @@ class ChatSelectText : NSObject {
                     }
                 }
                 
-                if row < 0 || (!NSPointInRect(point, table.frame) || hasModals() || (!table.item(at: row).canMultiselectTextIn(event.locationInWindow) && chatInteraction.presentation.state != .selecting)) || !isCurrentTableView(window.contentView?.hitTest(event.locationInWindow)) {
-                    self?.beginInnerLocation = NSZeroPoint
+                if row < 0 || (!NSPointInRect(point, table.frame) || hasModals() || (!table.item(at: row).canMultiselectTextIn(event.locationInWindow) && chatInteraction.presentation.state != .selecting)) || !isCurrentTableView(window.contentView?.hitTest(event.locationInWindow)) {       self?.beginInnerLocation = NSZeroPoint
                 } else {
                     self?.beginInnerLocation = documentPoint
                 }
@@ -268,6 +299,7 @@ class ChatSelectText : NSObject {
         window.set(mouseHandler: { [weak self] event -> KeyHandlerResult in
             
             self?.beginInnerLocation = NSZeroPoint
+            self?.locationInWindow = nil
             
             Queue.mainQueue().justDispatch {
                 guard let table = self?.table else {return}
@@ -308,14 +340,22 @@ class ChatSelectText : NSObject {
         window.set(mouseHandler: { [weak self] event -> KeyHandlerResult in
             
             guard let `self` = self else {return .rejected}
-
+            
+//            if let locationInWindow = self.locationInWindow {
+//                let old = (ceil(locationInWindow.x), ceil(locationInWindow.y))
+//                let new = (ceil(event.locationInWindow.x), round(event.locationInWindow.y))
+//                if abs(old.0 - new.0) <= 1 && abs(old.1 - new.1) <= 1 {
+//                    return .rejected
+//                }
+//            }
+            
             self.endInnerLocation = self.table.documentView?.convert(window.mouseLocationOutsideOfEventStream, from: nil) ?? NSZeroPoint
             
 //            if let overView = window.contentView?.hitTest(window.mouseLocationOutsideOfEventStream) as? Control {
 //                 self?.started = overView.userInteractionEnabled == true
 //            }
             if self.started {
-                self.started = !hasPopover(window)
+                self.started = !hasPopover(window) && self.beginInnerLocation != NSZeroPoint
             }
             
            // NSLog("\(!NSPointInRect(event.locationInWindow, window.bounds))")
@@ -360,9 +400,7 @@ class ChatSelectText : NSObject {
         var startIndex = table.row(at: beginInnerLocation)
         var endIndex = table.row(at: endInnerLocation)
         
-        
-      
-        
+                
         let reversed = endIndex < startIndex;
         
         if(endIndex < startIndex) {
@@ -376,8 +414,9 @@ class ChatSelectText : NSObject {
         }
         
         let beginRow = table.row(at: beginInnerLocation)
-        if theme.bubbled, let view = table.item(at: beginRow).view as? ChatRowView, selectingText, table._mouseInside() {
-            if !NSPointInRect(view.convert(beginInnerLocation, from: table.documentView), view.bubbleFrame) {
+        if  let view = table.item(at: beginRow).view as? ChatRowView, selectingText, table._mouseInside() {
+            let rowPoint = view.convert(beginInnerLocation, from: table.documentView)
+            if (!NSPointInRect(rowPoint, view.bubbleFrame) && theme.bubbled) {
                 if startIndex != endIndex {
                     for i in max(0,startIndex) ... min(endIndex,table.count - 1)  {
                         let item = table.item(at: i) as? ChatRowItem

@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import SwiftSignalKitMac
-import TelegramCoreMac
+import Postbox
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
 
 enum PopularItemType : Hashable {
     
@@ -121,7 +122,7 @@ private final class PopularPeerItemView : HorizontalRowView {
         
         
     }
-    
+//    
 //    override var backdorColor: NSColor {
 //        return .random
 //    }
@@ -196,8 +197,8 @@ private final class PopularPeerItemView : HorizontalRowView {
     
     override func layout() {
         super.layout()
-        imageView.centerX()
-        textView.centerX(y: imageView.frame.maxY + 5)
+        imageView.centerX(addition: -4)
+        textView.centerX(y: imageView.frame.maxY + 5, addition: -4)
         badgeView.setFrameOrigin(imageView.frame.maxX - badgeView.frame.width / 2, 0)
         activeImage.setFrameOrigin(imageView.frame.maxX - activeImage.frame.width - 1, imageView.frame.maxY - 12)
     }
@@ -249,6 +250,11 @@ private final class PopularPeersRowView : TableRowView {
         addSubview(separator)
     }
     
+    override func layout() {
+        super.layout()
+        tableView.frame = bounds
+        separator.frame = NSMakeRect(frame.width - .borderSize, 0, .borderSize, frame.height)
+    }
     
     override func set(item: TableRowItem, animated: Bool) {
         super.set(item: item, animated: animated)
@@ -268,9 +274,7 @@ private final class PopularPeersRowView : TableRowView {
         }
         
         tableView.endTableUpdates()
-        
         separator.backgroundColor = theme.colors.border
-        separator.frame = NSMakeRect(frame.width - .borderSize, 0, .borderSize, frame.height)
     }
     
     required init?(coder: NSCoder) {

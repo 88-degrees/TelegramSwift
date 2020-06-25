@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 class ChatStickerContentView: ChatMediaContentView {
     private let statusDisposable = MetaDisposable()
     private var image:TransformImageView = TransformImageView()
@@ -20,6 +21,11 @@ class ChatStickerContentView: ChatMediaContentView {
     
     deinit {
         statusDisposable.dispose()
+    }
+    
+    
+    override func clean() {
+        statusDisposable.set(nil)
     }
     
     override var backgroundColor: NSColor {
@@ -45,30 +51,37 @@ class ChatStickerContentView: ChatMediaContentView {
         if let window = window as? Window {
             if let context = context, let peerId = parent?.id.peerId, let media = media as? TelegramMediaFile, let reference = media.stickerReference {
                 
-                showModal(with:StickersPackPreviewModalController(context, peerId: peerId, reference: reference), for:window)
+                showModal(with:StickerPackPreviewModalController(context, peerId: peerId, reference: reference), for:window)
             }
         }
     }
     
     override func update(with media: Media, size: NSSize, context: AccountContext, parent:Message?, table:TableView?, parameters:ChatMediaLayoutParameters? = nil, animated: Bool = false, positionFlags: LayoutPositionFlags? = nil, approximateSynchronousValue: Bool = false) {
       
-
         super.update(with: media, size: size, context: context, parent:parent,table:table, parameters:parameters, animated: animated, positionFlags: positionFlags)
         
         if let file = media as? TelegramMediaFile {
+            
+            let dimensions =  file.dimensions?.size.aspectFitted(size) ?? size
+            
             let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: size, boundingSize: size, intrinsicInsets: NSEdgeInsets())
             
             self.image.animatesAlphaOnFirstTransition = false
            
-            self.image.setSignal(signal: cachedMedia(media: file, arguments: arguments, scale: backingScaleFactor), clearInstantly: false)
-            self.image.setSignal( chatMessageSticker(postbox: context.account.postbox, file: file, small: false, scale: backingScaleFactor, fetched: true), cacheImage: { signal in
-                return cacheMedia(signal: signal, media: file, arguments: arguments, scale: System.backingScale)
-            })
+            self.image.setSignal(signal: cachedMedia(media: file, arguments: arguments, scale: backingScaleFactor), clearInstantly: true)
+            if !self.image.isFullyLoaded {
+                self.image.setSignal( chatMessageSticker(postbox: context.account.postbox, file: file, small: size.width < 120, scale: backingScaleFactor, fetched: true), cacheImage: { [weak file] result in
+                    if let media = file {
+                        return cacheMedia(result, media: media, arguments: arguments, scale: System.backingScale)
+                    }
+                })
+                self.image.set(arguments: arguments)
+            } else {
+                self.image.dispose()
+            }
             
-            self.image.set(arguments: arguments)
-            self.image.setFrameSize(arguments.imageSize)
-            _ = fileInteractiveFetched(account: context.account, fileReference: parent != nil ? FileMediaReference.message(message: MessageReference(parent!), media: file) : FileMediaReference.standalone(media: file)).start()
-            
+            self.image.setFrameSize(dimensions)
+            self.image.center()
             self.fetchStatus = .Local
             
             let signal = context.account.postbox.mediaBox.resourceStatus(file.resource) |> deliverOnMainQueue
@@ -78,6 +91,11 @@ class ChatStickerContentView: ChatMediaContentView {
             }))
         }
         
+    }
+    
+    override func layout() {
+        super.layout()
+        self.image.center()
     }
     
 

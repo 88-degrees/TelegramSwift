@@ -7,26 +7,26 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
-import PostboxMac
-import TelegramCoreMac
+import SwiftSignalKit
+import Postbox
+import TelegramCore
+import SyncCore
 import TGUIKit
-import Lottie
 
 class ChatFileContentView: ChatMediaContentView {
     
 
 
-    var actionsLayout:TextViewLayout?
+    private var actionsLayout:TextViewLayout?
     
-    let progressView:RadialProgressView = RadialProgressView()
-    
+    private var progressView:RadialProgressView?
+    private var thumbProgress: RadialProgressView?
     private let thumbView:TransformImageView = TransformImageView()
     
-    var titleNode:TextNode = TextNode()
-    var actionText:TextView = TextView()
+    private var titleNode:TextNode = TextNode()
+    private var actionText:TextView = TextView()
     
-    var actionInteractions:TextViewInteractions = TextViewInteractions()
+    private var actionInteractions:TextViewInteractions = TextViewInteractions()
     
     private let statusDisposable = MetaDisposable()
     private let fetchDisposable = MetaDisposable()
@@ -48,9 +48,6 @@ class ChatFileContentView: ChatMediaContentView {
         self.addSubview(actionText)
         self.thumbView.setFrameSize(70,70)
         addSubview(thumbView)
-        
-        progressView.fetchControls = fetchControls
-        addSubview(progressView)
         
         actionInteractions.processURL = {[weak self] (link) in
             if let link = link as? String, link.hasSuffix("download") {
@@ -84,16 +81,10 @@ class ChatFileContentView: ChatMediaContentView {
     
     override func open() {
         if let context = context, let media = media as? TelegramMediaFile, let parent = parent  {
-            if media.isGraphicFile {
-                showChatGallery(context: context, message: parent, table, parameters as? ChatMediaGalleryParameters)
+            if media.isGraphicFile || media.isVideoFile {
+                showChatGallery(context: context, message: parent, table, parameters as? ChatMediaGalleryParameters, type: media.isVideoFile ? .alone : .history)
             } else {
-               
-                if let _ = Animation.filepath(context.account.postbox.mediaBox.resourcePath(media.resource)) {
-                    showChatGallery(context: context, message: parent, self.table, self.parameters as? ChatMediaGalleryParameters, type: .alone)
-                } else {
-                    QuickLookPreview.current.show(context: context, with: media, stableId: parent.chatStableId, self.table)
-                }
-                
+                QuickLookPreview.current.show(context: context, with: media, stableId: parent.chatStableId, self.table)
             }
         }
     }
@@ -113,7 +104,7 @@ class ChatFileContentView: ChatMediaContentView {
     }
     
     override func draggingAbility(_ event:NSEvent) -> Bool {
-        return NSPointInRect(convert(event.locationInWindow, from: nil), progressView.frame)
+        return NSPointInRect(convert(event.locationInWindow, from: nil), progressView?.frame ?? NSZeroRect)
     }
     
     deinit {
@@ -176,7 +167,7 @@ class ChatFileContentView: ChatMediaContentView {
             if let parent = parent, parent.flags.contains(.Unsent) && !parent.flags.contains(.Failed) {
                 let _ = attr.append(string: tr(L10n.messagesFileStateFetchingOut1(Int(progress * 100.0))), color: presentation.grayText, font: .normal(.text))
             } else {
-                let current = String.prettySized(with: Int(Float(file.elapsedSize) * progress))
+                let current = String.prettySized(with: Int(Float(file.elapsedSize) * progress), removeToken: true)
                 let size = "\(current) / \(String.prettySized(with: file.elapsedSize))"
                 let _ = attr.append(string: size, color: presentation.grayText, font: .normal(.text))
             }
@@ -226,7 +217,7 @@ class ChatFileContentView: ChatMediaContentView {
                             break
                         }
                     }
-                    if let pendingStatus = pendingStatus {
+                    if let pendingStatus = pendingStatus.0 {
                         return (.Fetching(isActive: true, progress: pendingStatus.progress), archiveStatus)
                     } else {
                         return (resourceStatus, archiveStatus)
@@ -255,36 +246,126 @@ class ChatFileContentView: ChatMediaContentView {
         
         if !file.previewRepresentations.isEmpty {
             
-            let arguments = TransformImageArguments(corners: ImageCorners(radius: 8), imageSize: file.previewRepresentations[0].dimensions, boundingSize: NSMakeSize(70, 70), intrinsicInsets: NSEdgeInsets())
+            let arguments = TransformImageArguments(corners: ImageCorners(radius: 8), imageSize: file.previewRepresentations[0].dimensions.size, boundingSize: NSMakeSize(70, 70), intrinsicInsets: NSEdgeInsets())
             thumbView.setSignal(signal: cachedMedia(messageId: stableId, arguments: arguments, scale: backingScaleFactor), clearInstantly: !semanticMedia)
             
             let reference = parent != nil ? FileMediaReference.message(message: MessageReference(parent!), media: file) : FileMediaReference.standalone(media: file)
-            thumbView.setSignal(chatMessageImageFile(account: context.account, fileReference: reference, progressive: false, scale: backingScaleFactor, synchronousLoad: false), clearInstantly: false, animate: true, synchronousLoad: false, cacheImage: { [weak self] image in
-                if let strongSelf = self {
-                    return cacheMedia(signal: image, messageId: stableId, arguments: arguments, scale: strongSelf.backingScaleFactor)
-                } else {
-                    return .complete()
+            thumbView.setSignal(chatMessageImageFile(account: context.account, fileReference: reference, progressive: false, scale: backingScaleFactor, synchronousLoad: false), clearInstantly: false, animate: true, synchronousLoad: false, cacheImage: { [weak file] result in
+                if let media = file {
+                    cacheMedia(result, media: media, arguments: arguments, scale: System.backingScale)
                 }
             })
             
             
             thumbView.set(arguments: arguments)
         } else {
-            thumbView.setSignal(signal: .single((nil, false)))
+            thumbView.setSignal(signal: .single(TransformImageResult(nil, false)))
         }
         
         self.setNeedsDisplay()
                 
         if let updatedStatusSignal = updatedStatusSignal {
-            self.statusDisposable.set((updatedStatusSignal |> deliverOnMainQueue).start(next: { [weak self] status, archiveStatus in
-                guard let `self` = self else {return}
+            self.statusDisposable.set((updatedStatusSignal |> deliverOnMainQueue).start(next: { [weak self, weak file] status, archiveStatus in
+                guard let `self` = self, let file = file else { return }
+                let oldStatus = self.fetchStatus
                 self.fetchStatus = status
+                
+                var statusWasUpdated: Bool = false
+                if let oldStatus = oldStatus {
+                    switch oldStatus {
+                    case .Fetching:
+                        if case .Fetching = status {} else {
+                            statusWasUpdated = true
+                        }
+                    case .Local:
+                        if case .Local = status {} else {
+                            statusWasUpdated = true
+                        }
+                    case .Remote:
+                        if case .Remote = status {} else {
+                            statusWasUpdated = true
+                        }
+                    }
+                }
                 
                 let layout = self.actionLayout(status: status, archiveStatus: archiveStatus, file: file, presentation: presentation, paremeters: parameters)
                 if !self.actionText.isEqual(to: layout) {
                     layout?.interactions = self.actionInteractions
                     self.actionText.update(layout)
                 }
+                
+                var removeThumbProgress: Bool = false
+                if case .Local = status {
+                    removeThumbProgress = true
+                }
+                
+                if !file.previewRepresentations.isEmpty {
+                    self.progressView?.removeFromSuperview()
+                    self.progressView = nil
+                    if !removeThumbProgress {
+                        if self.thumbProgress == nil {
+                            let progressView = RadialProgressView(theme:RadialProgressTheme(backgroundColor: .blackTransparent, foregroundColor: .white, icon: playerPlayThumb))
+                            progressView.frame = CGRect(origin: CGPoint(), size: CGSize(width: 40.0, height: 40.0))
+                            self.thumbProgress = progressView
+                            self.addSubview(progressView)
+                            let f = self.thumbView.focus(progressView.frame.size)
+                            self.thumbProgress?.setFrameOrigin(f.origin)
+                            progressView.fetchControls = self.fetchControls
+                        }
+                        switch status {
+                        case .Remote:
+                            self.thumbProgress?.state = .Remote
+                        case let .Fetching(_, progress):
+                            self.thumbProgress?.state = .Fetching(progress: progress, force: false)
+                        default:
+                            break
+                        }
+                    } else {
+                        if let progressView = self.thumbProgress {
+                            switch progressView.state {
+                            case .Fetching:
+                                progressView.state = .Fetching(progress:1.0, force: false)
+                            default:
+                                break
+                            }
+                            self.thumbProgress = nil
+                            progressView.layer?.animateAlpha(from: 1, to: 0, duration: 0.25, timingFunction: .linear, removeOnCompletion: false, completion: { [weak progressView] completed in
+                                if completed {
+                                    progressView?.removeFromSuperview()
+                                }
+                            })
+                            
+                        }
+                    }
+                    
+                } else {
+                    self.thumbProgress?.removeFromSuperview()
+                    self.thumbProgress = nil
+                    
+                    if self.progressView == nil {
+                        self.progressView = RadialProgressView()
+                        self.addSubview(self.progressView!)
+                    } else if statusWasUpdated {
+                        let progressView = self.progressView
+                        self.progressView = RadialProgressView()
+                        self.addSubview(self.progressView!)
+                        
+                        progressView?.layer?.animateAlpha(from: 1, to: 0.5, duration: 0.25, timingFunction: .linear, removeOnCompletion: false, completion: { [weak progressView] completed in
+                            if completed {
+                                progressView?.removeFromSuperview()
+                            }
+                        })
+                        self.progressView?.layer?.animateAlpha(from: 0.5, to: 1, duration: 0.25, timingFunction: .linear)
+                    }
+                }
+                
+                
+                guard let progressView = self.progressView else {
+                    return
+                }
+                
+                progressView.fetchControls = self.fetchControls
+                
                 switch status {
                 case let .Fetching(_, progress):
                     var progress = progress
@@ -299,17 +380,18 @@ class ChatFileContentView: ChatMediaContentView {
                         }
                     }
                     progress = max(progress, 0.1)
-                    self.progressView.theme = RadialProgressTheme(backgroundColor: file.previewRepresentations.isEmpty ? presentation.activityBackground : theme.colors.blackTransparent, foregroundColor:  file.previewRepresentations.isEmpty ? presentation.activityForeground : .white, icon: nil)
-                    self.progressView.state = archiveStatus != nil && self.parent == nil ? .Icon(image: presentation.fileThumb, mode: .normal) : .Fetching(progress: progress, force: false)
+                    progressView.theme = RadialProgressTheme(backgroundColor: file.previewRepresentations.isEmpty ? presentation.activityBackground : theme.colors.blackTransparent, foregroundColor:  file.previewRepresentations.isEmpty ? presentation.activityForeground : .white, icon: nil)
+                    progressView.state = archiveStatus != nil && self.parent == nil ? .Icon(image: presentation.fileThumb, mode: .normal) : .Fetching(progress: progress, force: false)
+                    
                 case .Local:
-                    self.progressView.theme = RadialProgressTheme(backgroundColor: file.previewRepresentations.isEmpty ? presentation.activityBackground : .clear, foregroundColor:  file.previewRepresentations.isEmpty ? presentation.activityForeground : .clear, icon: nil)
-                    self.progressView.state = !file.previewRepresentations.isEmpty ? .None : .Icon(image: presentation.fileThumb, mode: .normal)
+                    progressView.theme = RadialProgressTheme(backgroundColor: file.previewRepresentations.isEmpty ? presentation.activityBackground : .clear, foregroundColor:  file.previewRepresentations.isEmpty ? presentation.activityForeground : .clear, icon: nil)
+                    progressView.state = !file.previewRepresentations.isEmpty ? .None : .Icon(image: presentation.fileThumb, mode: .normal)
                 case .Remote:
-                    self.progressView.theme = RadialProgressTheme(backgroundColor: file.previewRepresentations.isEmpty ? presentation.activityBackground : theme.colors.blackTransparent, foregroundColor: file.previewRepresentations.isEmpty ? presentation.activityForeground : .white, icon: nil)
-                    self.progressView.state = archiveStatus != nil && self.parent == nil ? .Icon(image: presentation.fileThumb, mode: .normal) : .Remote
+                    progressView.theme = RadialProgressTheme(backgroundColor: file.previewRepresentations.isEmpty ? presentation.activityBackground : theme.colors.blackTransparent, foregroundColor: file.previewRepresentations.isEmpty ? presentation.activityForeground : .white, icon: nil)
+                    progressView.state = archiveStatus != nil && self.parent == nil ? .Icon(image: presentation.fileThumb, mode: .normal) : .Remote
                 }
                 
-                self.progressView.userInteractionEnabled = status != .Local
+                progressView.userInteractionEnabled = status != .Local
             }))
         }
         
@@ -319,14 +401,16 @@ class ChatFileContentView: ChatMediaContentView {
     override func layout() {
         super.layout()
         if let parameters = parameters as? ChatFileLayoutParameters {
-            let center = floorToScreenPixels(scaleFactor: backingScaleFactor, (parameters.hasThumb ? 70 : 40) / 2)
+            let center = floorToScreenPixels(backingScaleFactor, (parameters.hasThumb ? 70 : 40) / 2)
             actionText.setFrameOrigin(leftInset, parameters.hasThumb ? center + 2 : 20)
             
             if parameters.hasThumb {
-                let f = thumbView.focus(progressView.frame.size)
-                progressView.setFrameOrigin(f.origin)
+                if let thumbProgress = thumbProgress {
+                    let f = thumbView.focus(thumbProgress.frame.size)
+                    thumbProgress.setFrameOrigin(f.origin)
+                }
             } else {
-                progressView.setFrameOrigin(NSZeroPoint)
+                progressView?.setFrameOrigin(NSZeroPoint)
             }
         }
         
@@ -355,7 +439,7 @@ class ChatFileContentView: ChatMediaContentView {
         let parameters = self.parameters as? ChatFileLayoutParameters
 
         if let name = parameters?.name {
-            let center = floorToScreenPixels(scaleFactor: backingScaleFactor, frame.height/2)
+            let center = floorToScreenPixels(backingScaleFactor, frame.height/2)
             name.1.draw(NSMakeRect(leftInset, isHasThumb ? center - name.0.size.height - 2 : 1, name.0.size.width, name.0.size.height), in: ctx, backingScaleFactor: backingScaleFactor, backgroundColor: backgroundColor)
         }
     }
@@ -364,7 +448,7 @@ class ChatFileContentView: ChatMediaContentView {
         if let media = media as? TelegramMediaFile, !media.previewRepresentations.isEmpty {
             return thumbView.copy()
         }
-        return progressView.copy()
+        return progressView?.copy() ?? self
     }
     
     override var contents: Any? {
@@ -375,14 +459,14 @@ class ChatFileContentView: ChatMediaContentView {
         if let media = media as? TelegramMediaFile, !media.previewRepresentations.isEmpty {
             return thumbView.frame
         }
-        return progressView.frame
+        return progressView?.frame ?? frame
     }
     
     override func interactionContentView(for innerId: AnyHashable, animateIn: Bool ) -> NSView {
         if let media = media as? TelegramMediaFile, !media.previewRepresentations.isEmpty {
             return thumbView
         }
-        return progressView
+        return progressView ?? self
     }
     
     override func setContent(size: NSSize) {

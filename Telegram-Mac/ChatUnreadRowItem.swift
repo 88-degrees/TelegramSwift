@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 class ChatUnreadRowItem: ChatRowItem {
 
     override var height: CGFloat {
@@ -22,14 +23,14 @@ class ChatUnreadRowItem: ChatRowItem {
     
     public var text:NSAttributedString;
     
-    override init(_ initialSize:NSSize, _ chatInteraction:ChatInteraction, _ context: AccountContext, _ entry:ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings) {
+    override init(_ initialSize:NSSize, _ chatInteraction:ChatInteraction, _ context: AccountContext, _ entry:ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings, theme: TelegramPresentationTheme) {
         
         let titleAttr:NSMutableAttributedString = NSMutableAttributedString()
         let _ = titleAttr.append(string:tr(L10n.messagesUnreadMark), color: theme.colors.grayText, font: .normal(.text))
         text = titleAttr.copy() as! NSAttributedString
 
         
-        super.init(initialSize,chatInteraction,entry, downloadSettings)
+        super.init(initialSize,chatInteraction,entry, downloadSettings, theme: theme)
     }
     
     override var messageIndex:MessageIndex? {
@@ -59,6 +60,12 @@ private class ChatUnreadRowView: TableRowView {
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         self.layerContentsRedrawPolicy = .onSetNeedsDisplay
+        
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 3
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.1)
+        shadow.shadowOffset = NSMakeSize(0, 2)
+        self.shadow = shadow
     }
     
     required init?(coder: NSCoder) {

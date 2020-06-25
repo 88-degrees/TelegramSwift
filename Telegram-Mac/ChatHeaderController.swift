@@ -8,16 +8,18 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 
 
 
 enum ChatHeaderState : Identifiable, Equatable {
     case none
     case search(ChatSearchInteractions, Peer?)
-    case addContact
+    case addContact(block: Bool)
+    case shareInfo
     case pinned(MessageId)
     case report
     case sponsored
@@ -35,6 +37,8 @@ enum ChatHeaderState : Identifiable, Equatable {
             return 4
         case .sponsored:
             return 5
+        case .shareInfo:
+            return 6
         }
     }
     
@@ -47,6 +51,8 @@ enum ChatHeaderState : Identifiable, Equatable {
         case .report:
             return 44
         case .addContact:
+            return 44
+        case .shareInfo:
             return 44
         case .pinned:
             return 44
@@ -121,8 +127,10 @@ class ChatHeaderController {
     private func viewIfNecessary(_ size:NSSize) -> View? {
         let view:View?
         switch _headerState {
-        case .addContact:
-            view = AddContactView(chatInteraction)
+        case let .addContact(block):
+            view = AddContactView(chatInteraction, canBlock: block)
+        case .shareInfo:
+            view = ShareInfoView(chatInteraction)
         case let .pinned(messageId):
             view = ChatPinnedView(messageId, chatInteraction: chatInteraction)
         case let .search(interactions, initialPeer):
@@ -204,11 +212,12 @@ private final class ChatSponsoredView : Control {
         container.userInteractionEnabled = false
         self.style = ControlStyle(backgroundColor: theme.colors.background)
         addSubview(container)
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         self.backgroundColor = theme.colors.background
         self.dismiss.set(image: theme.icons.dismissPinned, for: .Normal)
         container.backgroundColor = theme.colors.background
@@ -254,7 +263,7 @@ class ChatPinnedView : Control {
         _ = self.dismiss.sizeToFit()
         
         self.set(handler: { [weak self] _ in
-            self?.chatInteraction.focusMessageId(nil, messageId, .center(id: 0, innerId: nil, animated: true, focus: true, inset: 0))
+            self?.chatInteraction.focusMessageId(nil, messageId, .center(id: 0, innerId: nil, animated: true, focus: .init(focus: true), inset: 0))
         }, for: .Click)
         
         dismiss.set(handler: { [weak self] _ in
@@ -273,11 +282,12 @@ class ChatPinnedView : Control {
                 _ = requestUpdatePinnedMessage(account: chatInteraction.context.account, peerId: chatInteraction.peerId, update: .clear).start()
             }
         }))
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         node.update()
         self.backgroundColor = theme.colors.background
         self.dismiss.set(image: theme.icons.dismissPinned, for: .Normal)
@@ -328,30 +338,31 @@ class ChatReportView : Control {
         
         self.style = ControlStyle(backgroundColor: theme.colors.background)
         
-        report.set(text: tr(L10n.chatHeaderReportSpam), for: .Normal)
+        report.set(text: L10n.chatHeaderReportSpam, for: .Normal)
         _ = report.sizeToFit()
         
         self.dismiss.set(image: theme.icons.dismissPinned, for: .Normal)
         _ = self.dismiss.sizeToFit()
         
         report.set(handler: { _ in
-            chatInteraction.reportSpamAndClose()
+            chatInteraction.blockContact()
         }, for: .SingleClick)
         
         dismiss.set(handler: { _ in
-            chatInteraction.dismissPeerReport()
+            chatInteraction.dismissPeerStatusOptions()
         }, for: .SingleClick)
         
         addSubview(dismiss)
         addSubview(report)
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         dismiss.set(image: theme.icons.dismissPinned, for: .Normal)
         report.set(text: tr(L10n.chatHeaderReportSpam), for: .Normal)
-        report.style = ControlStyle(font: .normal(.text), foregroundColor: theme.colors.blueUI, backgroundColor: theme.colors.background, highlightColor: theme.colors.blueSelect)
+        report.style = ControlStyle(font: .normal(.text), foregroundColor: theme.colors.redUI, backgroundColor: theme.colors.background, highlightColor: theme.colors.accentSelect)
         _ = report.sizeToFit()
         self.backgroundColor = theme.colors.background
         needsLayout = true
@@ -377,39 +388,54 @@ class ChatReportView : Control {
     }
 }
 
-class AddContactView : Control {
+class ShareInfoView : Control {
     private let chatInteraction:ChatInteraction
-    private let add:TitleButton = TitleButton()
+    private let share:TitleButton = TitleButton()
     private let dismiss:ImageButton = ImageButton()
-
     init(_ chatInteraction:ChatInteraction) {
         self.chatInteraction = chatInteraction
         super.init()
         self.style = ControlStyle(backgroundColor: theme.colors.background)
         dismiss.disableActions()
-        add.set(text: tr(L10n.peerInfoAddContact), for: .Normal)
-        _ = add.sizeToFit()
         
         dismiss.set(image: theme.icons.dismissPinned, for: .Normal)
         _ = dismiss.sizeToFit()
-
-        add.set(handler: { _ in
-            chatInteraction.addContact()
+        
+        share.set(handler: { _ in
+            chatInteraction.shareSelfContact(nil)
+            chatInteraction.dismissPeerStatusOptions()
         }, for: .SingleClick)
         
         dismiss.set(handler: { _ in
-            
+            chatInteraction.dismissPeerStatusOptions()
         }, for: .SingleClick)
         
-        addSubview(add)
-        updateLocalizationAndTheme()
+        
+        
+        addSubview(share)
+        addSubview(dismiss)
+        updateLocalizationAndTheme(theme: theme)
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        
+        if window == nil {
+            var bp:Int = 0
+            bp += 1
+        }
+    }
+    
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         dismiss.set(image: theme.icons.dismissPinned, for: .Normal)
-        add.style = ControlStyle(font: .normal(.text), foregroundColor: theme.colors.blueUI, backgroundColor: theme.colors.background, highlightColor: theme.colors.blueSelect)
+        share.style = ControlStyle(font: .normal(.text), foregroundColor: theme.colors.accent, backgroundColor: theme.colors.background, highlightColor: theme.colors.accentSelect)
+        
+        share.set(text: L10n.peerInfoShareMyInfo, for: .Normal)
+
         self.backgroundColor = theme.colors.background
+        needsLayout = true
     }
     
     override func draw(_ layer: CALayer, in ctx: CGContext) {
@@ -419,7 +445,95 @@ class AddContactView : Control {
     }
     
     override func layout() {
-        add.center()
+        super.layout()
+        dismiss.centerY(x: frame.width - dismiss.frame.width - 20)
+        share.center()
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    required init(frame frameRect: NSRect) {
+        fatalError("init(frame:) has not been implemented")
+    }
+}
+
+class AddContactView : Control {
+    private let chatInteraction:ChatInteraction
+    private let add:TitleButton = TitleButton()
+    private let dismiss:ImageButton = ImageButton()
+    private let blockButton: TitleButton = TitleButton()
+    private let buttonsContainer = View()
+    init(_ chatInteraction:ChatInteraction, canBlock: Bool) {
+        self.chatInteraction = chatInteraction
+        super.init()
+        self.style = ControlStyle(backgroundColor: theme.colors.background)
+        dismiss.disableActions()
+        
+        dismiss.set(image: theme.icons.dismissPinned, for: .Normal)
+        _ = dismiss.sizeToFit()
+
+        add.set(handler: { _ in
+            chatInteraction.addContact()
+        }, for: .SingleClick)
+        
+        dismiss.set(handler: { _ in
+            chatInteraction.dismissPeerStatusOptions()
+        }, for: .SingleClick)
+        
+        blockButton.set(handler: { _ in
+            chatInteraction.blockContact()
+        }, for: .SingleClick)
+        
+        
+       
+        
+        buttonsContainer.addSubview(add)
+        if canBlock {
+            buttonsContainer.addSubview(blockButton)
+        }
+        addSubview(buttonsContainer)
+        addSubview(dismiss)
+        updateLocalizationAndTheme(theme: theme)
+    }
+    
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
+        dismiss.set(image: theme.icons.dismissPinned, for: .Normal)
+        add.style = ControlStyle(font: .normal(.text), foregroundColor: theme.colors.accent, backgroundColor: theme.colors.background, highlightColor: theme.colors.accentSelect)
+        blockButton.style = ControlStyle(font: .normal(.text), foregroundColor: theme.colors.redUI, backgroundColor: theme.colors.background, highlightColor: theme.colors.redUI)
+        
+        if blockButton.superview == nil, let peer = chatInteraction.peer {
+            add.set(text: L10n.peerInfoAddUserToContact(peer.compactDisplayTitle), for: .Normal)
+        } else {
+            add.set(text: L10n.peerInfoAddContact, for: .Normal)
+        }
+        blockButton.set(text: L10n.peerInfoBlockUser, for: .Normal)
+
+        
+        self.backgroundColor = theme.colors.background
+        needsLayout = true
+    }
+    
+    override func draw(_ layer: CALayer, in ctx: CGContext) {
+        super.draw(layer, in: ctx)
+        ctx.setFillColor(theme.colors.border.cgColor)
+        ctx.fill(NSMakeRect(0, layer.frame.height - .borderSize, layer.frame.width, .borderSize))
+    }
+    
+    override func layout() {
+        dismiss.centerY(x: frame.width - dismiss.frame.width - 20)
+        if blockButton.superview == nil {
+            buttonsContainer.frame = NSMakeRect(0, 0, frame.width, frame.height - .borderSize)
+            add.setFrameSize(NSMakeSize(add.frame.width, buttonsContainer.frame.height))
+            add.center()
+        } else {
+            buttonsContainer.frame = NSMakeRect(0, 0, frame.width - (frame.width - dismiss.frame.minX), frame.height - .borderSize)
+            add.frame = NSMakeRect(buttonsContainer.frame.width / 2, 0, buttonsContainer.frame.width / 2, buttonsContainer.frame.height)
+            blockButton.frame = NSMakeRect(0, 0, buttonsContainer.frame.width / 2, buttonsContainer.frame.height)
+        }
     }
     
     required init?(coder: NSCoder) {
@@ -652,15 +766,45 @@ class ChatSearchHeader : View, Notifable {
                     calendar.isHidden = !calendarAbility
                     needsLayout = true
                     searchView.change(size: NSMakeSize(searchWidth, searchView.frame.height), animated: animated)
-                    inputInteraction.update(animated: animated, { state in
-                        return state.updatedInputQueryResult { previousResult in
-                            
-                            let result = state.searchState.responder ? state.messages : ([], nil)
-                            return .searchMessages((result.0, result.1, { searchMessagesState in
-                                stateValue.set(SearchStateQuery(state.searchState.request, searchMessagesState))
-                            }), state.searchState.request)
-                        }.updatedPeerId(nil)
-                    })
+                    
+                    if peer.isSupergroup || peer.isGroup {
+                        if let (updatedContextQueryState, updatedContextQuerySignal) = chatContextQueryForSearchMention(peer: peer, .mention(query: value.searchState.request, includeRecent: false), currentQuery: self.contextQueryState?.0, context: context) {
+                            self.contextQueryState?.1.dispose()
+                            self.contextQueryState = (updatedContextQueryState, (updatedContextQuerySignal |> deliverOnMainQueue).start(next: { [weak self] result in
+                                if let strongSelf = self {
+                                    strongSelf.inputInteraction.update(animated: animated, { state in
+                                        return state.updatedInputQueryResult { previousResult in
+                                            let messages = state.searchState.responder ? state.messages : ([], nil)
+                                            var suggestedPeers:[Peer] = []
+                                            let inputQueryResult = result(previousResult)
+                                            if let inputQueryResult = inputQueryResult, state.searchState.responder, !state.searchState.request.isEmpty, messages.1 != nil {
+                                                switch inputQueryResult {
+                                                case let .mentions(mentions):
+                                                    suggestedPeers = mentions
+                                                default:
+                                                    break
+                                                }
+                                            }
+                                            return .searchMessages((messages.0, messages.1, { searchMessagesState in
+                                                stateValue.set(SearchStateQuery(state.searchState.request, searchMessagesState))
+                                            }), suggestedPeers, state.searchState.request)
+                                        }
+                                    })
+                                }
+                            }))
+                        }
+                    } else {
+                        inputInteraction.update(animated: animated, { state in
+                            return state.updatedInputQueryResult { previousResult in
+                                let result = state.searchState.responder ? state.messages : ([], nil)
+                                return .searchMessages((result.0, result.1, { searchMessagesState in
+                                    stateValue.set(SearchStateQuery(state.searchState.request, searchMessagesState))
+                                }), [], state.searchState.request)
+                            }
+                        })
+                    }
+                    
+                    
                 case let .from(query, complete):
                     from.isHidden = true
                     calendar.isHidden = true
@@ -672,7 +816,7 @@ class ChatSearchHeader : View, Notifable {
                                 let result = state.searchState.responder ? state.messages : ([], nil)
                                 return .searchMessages((result.0, result.1, { searchMessagesState in
                                     stateValue.set(SearchStateQuery(state.searchState.request, searchMessagesState))
-                                }), state.searchState.request)
+                                }), [], state.searchState.request)
                             }
                         })
                     } else {
@@ -859,11 +1003,12 @@ class ChatSearchHeader : View, Notifable {
         addSubview(cancel)
         addSubview(separator)
         
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         backgroundColor = theme.colors.background
         
         next.set(image: theme.icons.chatSearchDown, for: .Normal)

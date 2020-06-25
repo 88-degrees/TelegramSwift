@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 
 class ChatCallRowItem: ChatRowItem {
     
@@ -24,7 +25,7 @@ class ChatCallRowItem: ChatRowItem {
         return ChatCallRowView.self
     }
     
-    override init(_ initialSize: NSSize, _ chatInteraction: ChatInteraction, _ context: AccountContext, _ object: ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings) {
+    override init(_ initialSize: NSSize, _ chatInteraction: ChatInteraction, _ context: AccountContext, _ object: ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings, theme: TelegramPresentationTheme) {
         
         let message = object.message!
         let action = message.media[0] as! TelegramMediaAction
@@ -61,7 +62,7 @@ class ChatCallRowItem: ChatRowItem {
             failed = true
         }
         
-        super.init(initialSize, chatInteraction, context, object, downloadSettings)
+        super.init(initialSize, chatInteraction, context, object, downloadSettings, theme: theme)
     }
     
     override func makeContentSize(_ width: CGFloat) -> NSSize {

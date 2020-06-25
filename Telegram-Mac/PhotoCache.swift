@@ -7,12 +7,19 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 import TGUIKit
+import SyncCore
 
-struct PhotoCachedRecord {
+enum ThemeSource : Equatable {
+    case local(ColorPalette, TelegramTheme?)
+    case cloud(TelegramTheme)
+}
+
+private final class PhotoCachedRecord {
     let date:TimeInterval
     let image:CGImage
     let size:Int
@@ -23,23 +30,74 @@ struct PhotoCachedRecord {
     }
 }
 
+public final class TransformImageResult {
+    let image: CGImage?
+    let highQuality: Bool
+    init(_ image: CGImage?, _ highQuality: Bool) {
+        self.image = image
+        self.highQuality = highQuality
+    }
+    deinit {
+        
+    }
+}
 
 
 enum PhotoCacheKeyEntry : Hashable {
     case avatar(PeerId, TelegramMediaImageRepresentation, NSSize, CGFloat)
     case emptyAvatar(PeerId, String, NSColor, NSSize, CGFloat)
     case media(Media, TransformImageArguments, CGFloat, LayoutPositionFlags?)
+    case platformTheme(TelegramThemeSettings, TransformImageArguments, CGFloat, LayoutPositionFlags?)
     case messageId(stableId: Int64, TransformImageArguments, CGFloat, LayoutPositionFlags)
+    case theme(ThemeSource, Bool)
     var hashValue:Int {
+        return 0
+    }
+    
+    var stringValue: NSString {
         switch self {
-        case let .avatar(peerId, _, _, _):
-            return peerId.id.hashValue
-        case let .emptyAvatar(peerId, _, _, _, _):
-            return peerId.id.hashValue
-        case let .messageId(stableId, _, _, _):
-            return stableId.hashValue
-        case let .media(media, _, _, _):
-            return media.id?.id.hashValue ?? 0
+        case let .avatar(peerId, rep, size, scale):
+            return "avatar-\(peerId.toInt64())-\(rep.resource.id.hashValue)-\(size.width)-\(size.height)-\(scale)".nsstring
+        case let .emptyAvatar(peerId, letters, color, size, scale):
+            return "emptyAvatar-\(peerId.toInt64())-\(letters)-\(color.hexString)-\(size.width)-\(size.height)-\(scale)".nsstring
+        case let .media(media, transform, scale, layout):
+            var addition: String = ""
+            if let media = media as? TelegramMediaMap {
+                addition = "\(media.longitude)-\(media.latitude)"
+            }
+            if let media = media as? TelegramMediaFile {
+                addition += "\(media.resource.id.uniqueId)-\(String(describing: media.resource.size))"
+                #if !SHARE
+                if let fitz = media.animatedEmojiFitzModifier {
+                    addition += "fitz-\(fitz.rawValue)"
+                }
+                #endif
+            }
+            return "media-\(String(describing: media.id?.id))-\(transform)-\(scale)-\(String(describing: layout?.rawValue))-\(addition)".nsstring
+        case let .messageId(stableId, transform, scale, layout):
+            return "messageId-\(stableId)-\(transform)-\(scale)-\(layout.rawValue)".nsstring
+        case let .theme(source, bubbled):
+            switch source {
+            case let .local(palette, cloud):
+                if let settings = cloud?.settings {
+                    #if !SHARE
+                    return "theme-local-\(palette.name)-bubbled\(bubbled ? 1 : 0)-\(settings.desc)".nsstring
+                    #else
+                    return ""
+                    #endif
+                }   else {
+                    return "theme-local-\(palette.name)-bubbled\(bubbled ? 1 : 0)-\(palette.accent.argb)".nsstring
+                }
+            case let .cloud(cloud):
+                return "theme-remote-\(cloud.id)\(String(describing: cloud.file?.id))-bubbled\(bubbled ? 1 : 0)".nsstring
+            }
+        case let .platformTheme(settings, arguments, scale, layout):
+            #if !SHARE
+            return "theme-\(settings.desc)-\(arguments)-\(scale)-\(String(describing: layout?.rawValue))".nsstring
+            #else
+            return ""
+            #endif
+            
         }
     }
     
@@ -98,79 +156,63 @@ enum PhotoCacheKeyEntry : Hashable {
             } else {
                 return false
             }
+        case let .theme(source, bubbled):
+            if case .theme(source, bubbled) = rhs {
+                return true
+            } else {
+                return false
+            }
+        case let .platformTheme(settings, arguments, scale, position):
+            if case .platformTheme(settings, arguments, scale, position) = rhs {
+                return true
+            } else {
+                return false
+            }
         }
     }
 }
 
 
 
-class PhotoCache {
+private class PhotoCache {
     let memoryLimit:Int
-    let maxCount:Int = 1000
-    private var values:[PhotoCacheKeyEntry:PhotoCachedRecord] = [:]
-    private let queue:Queue = Queue()
+    let maxCount:Int = 50
+    private var values:NSCache<NSString, PhotoCachedRecord> = NSCache()
     
-    init(_ memoryLimit:Int = 16*1024*1024) {
+    init(_ memoryLimit:Int = 15) {
         self.memoryLimit = memoryLimit
+        self.values.countLimit = memoryLimit
     }
     
-    func cacheImage(_ image:CGImage, for key:PhotoCacheKeyEntry) {
-        queue.justDispatch {
-            self.values[key] = PhotoCachedRecord(image: image, size: Int(image.size.width * image.size.height * 4))
-            self.freeMemoryIfNeeded()
-        }
+    fileprivate func cacheImage(_ image:CGImage, for key:PhotoCacheKeyEntry) {
+        self.values.setObject(PhotoCachedRecord(image: image, size: Int(image.backingSize.width * image.backingSize.height * 4)), forKey: key.stringValue)
     }
     
     private func freeMemoryIfNeeded() {
-        assert(queue.isCurrent())
-        
-        let total = values.reduce(0, { (current, value: (key: PhotoCacheKeyEntry, value: PhotoCachedRecord)) -> Int in
-            return current + value.value.size
-        })
-        
-        if total > memoryLimit {
-            let list = values.map ({($0.key, $0.value)}).sorted(by: { lhs, rhs -> Bool in
-                return lhs.1.date < rhs.1.date
-            })
-            
-            var clearedMemorySize: Int = 0
-            
-            for entry in list {
-                values.removeValue(forKey: entry.0)
-                clearedMemorySize += entry.1.size
-                
-                if total - clearedMemorySize < memoryLimit {
-                    break
-                }
-            }
-        }
     }
     
     func cachedImage(for key:PhotoCacheKeyEntry) -> CGImage? {
         var image:CGImage? = nil
-        queue.sync {
-            image = self.values[key]?.image
-        }
+        image = self.values.object(forKey: key.stringValue)?.image
         return image
     }
     
     func removeRecord(for key:PhotoCacheKeyEntry) {
-        queue.justDispatch {
-            self.values.removeValue(forKey: key)
-        }
+        self.values.removeObject(forKey: key.stringValue)
     }
     
     func clearAll() {
-        queue.justDispatch {
-            self.values.removeAll()
-        }
+        self.values.removeAllObjects()
     }
 }
 
 
-private let peerPhotoCache = PhotoCache()
-private let photosCache = PhotoCache(48 * 1024 * 1024)
-private let photoThumbsCache = PhotoCache(8 * 1024 * 1024)
+private let peerPhotoCache = PhotoCache(100)
+private let photosCache = PhotoCache(50)
+private let photoThumbsCache = PhotoCache(50)
+private let themeThums = PhotoCache(100)
+
+private let stickersCache = PhotoCache(500)
 
 
 func clearImageCache() -> Signal<Void, NoError> {
@@ -212,20 +254,38 @@ func cachedEmptyPeerPhotoImmediatly(_ peerId:PeerId, symbol: String, color: NSCo
     return peerPhotoCache.cachedImage(for: entry)
 }
 
-func cachedMedia(media: Media, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Signal<(CGImage?, Bool), NoError> {
+func cachedMedia(media: Media, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Signal<TransformImageResult, NoError> {
     let entry:PhotoCacheKeyEntry = .media(media, arguments, scale, positionFlags)
     let value: CGImage?
     var full: Bool = false
-    if let image = photosCache.cachedImage(for: entry) {
+    
+    if arguments.imageSize.width <= 60, let media = media as? TelegramMediaFile, media.isStaticSticker || media.isAnimatedSticker, let image = stickersCache.cachedImage(for: entry) {
+        value = image
+        full = true
+    } else if let image = photosCache.cachedImage(for: entry) {
         value = image
         full = true
     } else {
         value = photoThumbsCache.cachedImage(for: entry)
     }
-    return .single((value, full))
+    return .single(TransformImageResult(value, full))
 }
 
-func cachedMedia(messageId: Int64, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Signal<(CGImage?, Bool), NoError> {
+func cachedMedia(media: TelegramThemeSettings, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Signal<TransformImageResult, NoError> {
+    let entry:PhotoCacheKeyEntry = .platformTheme(media, arguments, scale, positionFlags)
+    let value: CGImage?
+    var full: Bool = false
+    
+    if let image = photosCache.cachedImage(for: entry) {
+        value = image
+        full = true
+    } else {
+        value = nil
+    }
+    return .single(TransformImageResult(value, full))
+}
+
+func cachedMedia(messageId: Int64, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Signal<TransformImageResult, NoError> {
     let entry:PhotoCacheKeyEntry = .messageId(stableId: messageId, arguments, scale, positionFlags ?? [])
     let value: CGImage?
     var full: Bool = false
@@ -235,37 +295,66 @@ func cachedMedia(messageId: Int64, arguments: TransformImageArguments, scale: CG
     } else {
         value = photoThumbsCache.cachedImage(for: entry)
     }
-    return .single((value, full))
+    return .single(TransformImageResult(value, full))
 }
 
-func cacheMedia(signal:Signal<(CGImage?, Bool), NoError>, media: Media, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Signal <Void, NoError> {
-    // |> filter {$0.1}
-    return signal |> mapToSignal { (image, highResolution) -> Signal<Void, NoError> in
-        if let image = image {
-            let entry:PhotoCacheKeyEntry = .media(media, arguments, scale, positionFlags)
-            if !highResolution {
-                return .single(photoThumbsCache.cacheImage(image, for: entry))
-            } else {
-                return .single(photosCache.cacheImage(image, for: entry))
-            }
+func cacheMedia(_ result: TransformImageResult, media: Media, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Void {
+    if let image = result.image {
+        let entry:PhotoCacheKeyEntry = .media(media, arguments, scale, positionFlags)
+        if arguments.imageSize.width <= 60, result.highQuality, let media = media as? TelegramMediaFile,  media.isStaticSticker || media.isAnimatedSticker {
+            stickersCache.cacheImage(image, for: entry)
+        } else if !result.highQuality {
+            photoThumbsCache.cacheImage(image, for: entry)
+        } else {
+            photosCache.cacheImage(image, for: entry)
         }
-        return .complete()
     }
 }
 
-func cacheMedia(signal:Signal<(CGImage?, Bool), NoError>, messageId: Int64, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Signal <Void, NoError> {
-    
-    return signal |> mapToSignal { (image, highResolution) -> Signal<Void, NoError> in
-        if let image = image {
-            let entry:PhotoCacheKeyEntry = .messageId(stableId: messageId, arguments, scale, positionFlags ?? [])
-            if !highResolution {
-                return .single(photoThumbsCache.cacheImage(image, for: entry))
-            } else {
-                return .single(photosCache.cacheImage(image, for: entry))
-            }
-        }
-        return .complete()
+func cacheMedia(_ result: TransformImageResult, media: TelegramThemeSettings, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Void {
+    if let image = result.image {
+        let entry:PhotoCacheKeyEntry = .platformTheme(media, arguments, scale, positionFlags)
+        photosCache.cacheImage(image, for: entry)
     }
-    
 }
 
+func cacheMedia(_ result: TransformImageResult, messageId: Int64, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Void {
+    
+    if let image = result.image {
+        let entry:PhotoCacheKeyEntry = .messageId(stableId: messageId, arguments, scale, positionFlags ?? [])
+        if !result.highQuality {
+            photoThumbsCache.cacheImage(image, for: entry)
+        } else {
+            photosCache.cacheImage(image, for: entry)
+        }
+    }
+}
+
+func cachedThemeThumb(source: ThemeSource, bubbled: Bool) -> Signal<TransformImageResult, NoError> {
+    let entry:PhotoCacheKeyEntry = .theme(source, bubbled)
+    let value: CGImage?
+    var full: Bool = false
+    if let image = themeThums.cachedImage(for: entry) {
+        value = image
+        full = true
+    } else {
+        value = themeThums.cachedImage(for: entry)
+    }
+    if value == nil {
+        var bp:Int = 0
+        bp += 1
+    }
+    return .single(TransformImageResult(value, full))
+}
+
+func cacheThemeThumb(_ result: TransformImageResult, source: ThemeSource, bubbled: Bool) -> Void {
+    let entry:PhotoCacheKeyEntry = .theme(source, bubbled)
+    
+    if let image = result.image {
+        if !result.highQuality {
+            themeThums.cacheImage(image, for: entry)
+        } else {
+            themeThums.cacheImage(image, for: entry)
+        }
+    }
+}

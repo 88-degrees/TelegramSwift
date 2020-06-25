@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 
 
 
@@ -92,7 +93,7 @@ private final class ChatListExpandView: View {
 
         self.addSubview(titleView)
     }
-    override func updateLocalizationAndTheme() {
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
         let titleLayout = TextViewLayout(.initialize(string: L10n.chatListArchivedChats, color: theme.colors.grayText, font: .medium(12)), maximumNumberOfLines: 1, alwaysStaticItems: true)
         titleLayout.measure(width: .greatestFiniteMagnitude)
         titleView.update(titleLayout)
@@ -132,7 +133,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
     private var hiddemMessage:Bool = false
     private let peerInputActivitiesDisposable:MetaDisposable = MetaDisposable()
     private var removeControl:ImageButton? = nil
-    private var animatedView: ChatRowAnimateView?
+    private var animatedView: RowAnimateView?
     private var archivedPhoto: LAnimationButton?
     private let containerView: ChatListDraggingContainerView = ChatListDraggingContainerView(frame: NSZeroRect)
     private var expandView: ChatListExpandView?
@@ -176,6 +177,9 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
     var inputActivities:(PeerId, [(Peer, PeerInputActivity)])? {
         didSet {
             if let inputActivities = inputActivities, let item = item as? ChatListRowItem {
+                let oldValue = oldValue?.1.map {
+                    ChatListInputActivity($0, $1)
+                }
                 
                 if inputActivities.1.isEmpty {
                     activitiesModel?.clean()
@@ -188,6 +192,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                     containerView.addSubview(activitiesModel!.view!)
                 }
                 
+                
                 let activity:ActivitiesTheme
                 if item.isSelected && item.context.sharedContext.layout != .single {
                     activity = theme.activity(key: 10 + (theme.dark ? 10 : 20), foregroundColor: theme.chatList.activitySelectedColor, backgroundColor: theme.chatList.selectedBackgroundColor)
@@ -197,23 +202,28 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                     activity = theme.activity(key: 12 + (theme.dark ? 10 : 20), foregroundColor: theme.chatList.activityPinnedColor, backgroundColor: theme.chatList.pinnedBackgroundColor)
                 } else if contextMenu != nil {
                     activity = theme.activity(key: 13 + (theme.dark ? 10 : 20), foregroundColor: theme.chatList.activityContextMenuColor, backgroundColor: theme.chatList.contextMenuBackgroundColor)
+                } else if self.containerView.activeDragging || item.isHighlighted {
+                    activity = theme.activity(key: 13 + (theme.dark ? 10 : 20), foregroundColor: theme.chatList.activityColor, backgroundColor: theme.chatList.activeDraggingBackgroundColor)
                 } else {
                     activity = theme.activity(key: 14 + (theme.dark ? 10 : 20), foregroundColor: theme.chatList.activityColor, backgroundColor: theme.colors.background)
                 }
-                
-                activitiesModel?.update(with: inputActivities, for: item.messageWidth, theme:  activity, layout: { [weak self] show in
-                    if let item = self?.item as? ChatListRowItem, let displayLayout = item.ctxDisplayLayout {
-                        self?.activitiesModel?.view?.setFrameOrigin(item.leftInset, displayLayout.0.size.height + item.margin + 3)
-                    }
-                    self?.hiddemMessage = show
-                    self?.containerView.needsDisplay = true
-                })
+                if oldValue != item.activities || activity != activitiesModel?.theme {
+                    activitiesModel?.update(with: inputActivities, for: item.messageWidth, theme:  activity, layout: { [weak self] show in
+                        if let item = self?.item as? ChatListRowItem, let displayLayout = item.ctxDisplayLayout {
+                            self?.activitiesModel?.view?.setFrameOrigin(item.leftInset, displayLayout.0.size.height + item.margin + 3)
+                        }
+                        self?.hiddemMessage = show
+                        self?.containerView.needsDisplay = true
+                    })
+                }
+              
                 
                 activitiesModel?.view?.isHidden = item.context.sharedContext.layout == .minimisize
             } else {
                 activitiesModel?.clean()
                 activitiesModel?.view?.removeFromSuperview()
                 activitiesModel = nil
+                hiddemMessage = false
             }
         }
     }
@@ -234,10 +244,10 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
     override func focusAnimation(_ innerId: AnyHashable?) {
         
         if animatedView == nil {
-            self.animatedView = ChatRowAnimateView(frame:bounds)
+            self.animatedView = RowAnimateView(frame:bounds)
             self.animatedView?.isEventLess = true
             containerView.addSubview(animatedView!)
-            animatedView?.backgroundColor = NSColor(0x68A8E2)
+            animatedView?.backgroundColor = theme.colors.focusAnimationColor
             animatedView?.layer?.opacity = 0
             
         }
@@ -270,7 +280,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                 return theme.colors.grayBackground
             }
             if item.isHighlighted && !item.isSelected {
-                return theme.colors.grayForeground
+                return theme.chatList.activeDraggingBackgroundColor
             }
             if item.context.sharedContext.layout == .single, item.isSelected {
                 return theme.chatList.singleLayoutSelectedBackgroundColor
@@ -289,15 +299,11 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
     
     
     override func draw(_ layer: CALayer, in ctx: CGContext) {
-        
-       // ctx.setFillColor(theme.colors.background.cgColor)
-       // ctx.fill(bounds)
+
         super.draw(layer, in: ctx)
+        
 //
          if let item = self.item as? ChatListRowItem {
-            
-           
-            
             if !item.isSelected {
                 
                 if layer != containerView.layer {
@@ -346,8 +352,8 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                     var mutedInset:CGFloat = item.isSecret ? theme.icons.secretImage.backingSize.width + 2 : 0
                     
                     if item.isVerified {
-                        ctx.draw(highlighted ? theme.icons.verifiedImageSelected : theme.icons.verifiedImage, in: NSMakeRect(displayLayout.0.size.width + item.leftInset + addition + 2, item.margin + 1, theme.icons.verifiedImage.backingSize.width, theme.icons.verifiedImage.backingSize.height))
-                        mutedInset += theme.icons.verifiedImage.backingSize.width + 3
+                        ctx.draw(highlighted ? theme.icons.verifyDialogActive : theme.icons.verifyDialog, in: NSMakeRect(displayLayout.0.size.width + item.leftInset + addition - 2, item.margin - 3, 24, 24))
+                        mutedInset += 15 + 3
                     }
                     
                     if item.isScam {
@@ -356,7 +362,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                     }
                     
                     if let messageLayout = item.ctxMessageLayout, !hiddemMessage {
-                        messageLayout.1.draw(NSMakeRect(item.leftInset, displayLayout.0.size.height + item.margin + 3 , messageLayout.0.size.width, messageLayout.0.size.height), in: ctx, backingScaleFactor: backingScaleFactor, backgroundColor: backgroundColor)
+                        messageLayout.1.draw(NSMakeRect(item.leftInset, displayLayout.0.size.height + item.margin + 1, messageLayout.0.size.width, messageLayout.0.size.height), in: ctx, backingScaleFactor: backingScaleFactor, backgroundColor: backgroundColor)
                     }
                     
                     if item.isMuted {
@@ -373,7 +379,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                         ctx.draw(icon, in: NSMakeRect(frame.width - (item.ctxBadgeNode != nil ? item.ctxBadgeNode!.size.width + item.margin : 0) - icon.backingSize.width - item.margin, frame.height - icon.backingSize.height - (item.margin + 1), icon.backingSize.width, icon.backingSize.height)) 
                     }
                     
-                    if let dateLayout = item.ctxDateLayout, !item.hasDraft, item.state == .plain {
+                    if let dateLayout = item.ctxDateLayout, !item.hasDraft {
                         let dateX = frame.width - dateLayout.0.size.width - item.margin
                         dateLayout.1.draw(NSMakeRect(dateX, item.margin, dateLayout.0.size.width, dateLayout.0.size.height), in: ctx, backingScaleFactor: backingScaleFactor, backgroundColor: backgroundColor)
                         
@@ -451,6 +457,9 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
 
     override func updateColors() {
         super.updateColors()
+        let inputActivities = self.inputActivities
+        self.inputActivities = inputActivities
+        self.containerView.background = backdorColor
         expandView?.backgroundColor = theme.colors.grayBackground
     }
 
@@ -462,7 +471,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                     expandView = ChatListExpandView(frame: NSMakeRect(0, frame.height, frame.width, item.height))
                     self.addSubview(expandView!, positioned: .below, relativeTo: containerView)
                 }
-                expandView?.updateLocalizationAndTheme()
+                expandView?.updateLocalizationAndTheme(theme: theme)
             }
         }
         
@@ -532,16 +541,17 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                 photo.setSignal(generateEmptyPhoto(photo.frame.size, type: .icon(colors: theme.colors.peerColors(5), icon: icon, iconSize: icon.backingSize.aspectFitted(NSMakeSize(photo.frame.size.width - 20, photo.frame.size.height - 20)), cornerRadius: nil)) |> map {($0, false)})
             } else if case .ArchivedChats = item.photo {
                 if self.archivedPhoto == nil {
-                    self.archivedPhoto = LAnimationButton(animation: "archiveAvatar", keysToColor: ["box2.box2.Fill 1"], color: theme.colors.grayForeground, scale: 0.14, offset: 0)
+                    self.archivedPhoto = LAnimationButton(animation: "archiveAvatar", size: NSMakeSize(46, 46), offset: NSMakeSize(0, 0))
                     containerView.addSubview(self.archivedPhoto!, positioned: .above, relativeTo: self.photo)
                 }
                 self.archivedPhoto?.frame = self.photo.frame
                 self.archivedPhoto?.userInteractionEnabled = false
-                self.archivedPhoto?.set(keysToColor: ["box2.box2.Fill 1"], color: item.archiveStatus?.isHidden == false ? theme.colors.revealAction_accent_background : theme.colors.revealAction_inactive_background)
-                self.archivedPhoto?.background = item.archiveStatus?.isHidden == false ? theme.colors.revealAction_accent_background : theme.colors.revealAction_inactive_background
+                self.archivedPhoto?.set(keysToColor: ["box2.box2.Fill 1"], color: item.archiveStatus?.isHidden == false ? theme.colors.revealAction_accent_background : theme.colors.grayForeground)
+                self.archivedPhoto?.background = item.archiveStatus?.isHidden == false ? theme.colors.revealAction_accent_background : theme.colors.grayForeground
                 self.archivedPhoto?.layer?.cornerRadius = photo.frame.height / 2
 
-                if item.animateArchive && animated {
+                let animateArchive = item.animateArchive && animated
+                if animateArchive {
                     archivedPhoto?.loop()
                     if item.isCollapsed {
                         self.expandView?.animateOnce()
@@ -581,100 +591,15 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                 additionalBadgeView?.removeFromSuperview()
                 additionalBadgeView = nil
             }
-
-            switch item.state {
-            case .plain:
-                if let removeControl = removeControl {
-                    removeControl.change(pos: NSMakePoint(frame.width, removeControl.frame.minY), animated: animated, completion: { [weak self] completed in
-                        if completed {
-                            self?.removeControl?.removeFromSuperview()
-                            self?.removeControl = nil
-                        }
-                    })
-                    removeControl.change(opacity: 0, animated: animated)
+            
+            if let peerId = item.peerId {
+                let activities = item.activities.map {
+                    ($0.peer.peer, $0.activity)
                 }
-                
-            case let .deletable(onRemove, _):
-                var isNew: Bool = false
-                if removeControl == nil {
-                    removeControl = ImageButton()
-                    removeControl?.autohighlight = false
-                    removeControl?.set(image: theme.icons.deleteItem, for: .Normal)
-                    removeControl?.frame = NSMakeRect(frame.width, 0, 60, frame.height)
-                    removeControl?.layer?.opacity = 0
-                    containerView.addSubview(removeControl!)
-                    isNew = true
-                }
-                guard let removeControl = removeControl else {return}
-                removeControl.removeAllHandlers()
-                removeControl.set(handler: { [weak item] _ in
-                    if let location = item?.chatLocation {
-                        onRemove(location)
-                    }
-                }, for: .Click)
-                let f = focus(removeControl.frame.size)
-                removeControl.change(pos: NSMakePoint(frame.width - removeControl.frame.width, f.minY), animated: isNew && animated)
-                removeControl.change(opacity: 1, animated: isNew && animated)
-                
+                self.inputActivities = (peerId, activities)
+            } else {
+                self.inputActivities = nil
             }
-            
-            if !(item is ChatListMessageRowItem) {
-                let postbox = item.context.account.postbox
-                let peerId = item.peerId
-                
-                
-                if let peerId = peerId {
-                    let previousPeerCache = Atomic<[PeerId: Peer]>(value: [:])
-                    self.peerInputActivitiesDisposable.set((item.context.account.peerInputActivities(peerId: peerId)
-                        |> mapToSignal { activities -> Signal<[(Peer, PeerInputActivity)], NoError> in
-                            var foundAllPeers = true
-                            var cachedResult: [(Peer, PeerInputActivity)] = []
-                            previousPeerCache.with { dict -> Void in
-                                for (peerId, activity) in activities {
-                                    if let peer = dict[peerId] {
-                                        cachedResult.append((peer, activity))
-                                    } else {
-                                        foundAllPeers = false
-                                        break
-                                    }
-                                }
-                            }
-                            if foundAllPeers {
-                                return .single(cachedResult)
-                            } else {
-                                return postbox.transaction { transaction -> [(Peer, PeerInputActivity)] in
-                                    var result: [(Peer, PeerInputActivity)] = []
-                                    var peerCache: [PeerId: Peer] = [:]
-                                    for (peerId, activity) in activities {
-                                        if let peer = transaction.getPeer(peerId) {
-                                            result.append((peer, activity))
-                                            peerCache[peerId] = peer
-                                        }
-                                    }
-                                    _ = previousPeerCache.swap(peerCache)
-                                    return result
-                                }
-                            }
-                    }
-                    |> deliverOnMainQueue).start(next: { [weak self, weak item] activities in
-                        if item?.context.peerId != item?.peerId {
-                            self?.inputActivities = (peerId, activities)
-                        } else {
-                            self?.inputActivities = (peerId, [])
-                        }
-                    }))
-                } else {
-                    self.inputActivities = nil
-                }
-                
-                
-                let inputActivities = self.inputActivities
-                self.inputActivities = inputActivities
-                
-                
-            }
-            
-            
          }
         
         if let _ = endRevealState {
@@ -723,7 +648,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
             let unreadBackground = !item.markAsUnread ? theme.colors.revealAction_inactive_background : theme.colors.revealAction_accent_background
             let unreadForeground = !item.markAsUnread ? theme.colors.revealAction_inactive_foreground : theme.colors.revealAction_accent_foreground
 
-            let unread: LAnimationButton = LAnimationButton(animation: !item.markAsUnread ? "anim_read" : "anim_unread", keysToColor: !item.markAsUnread ? nil : ["Oval.Oval.Stroke 1"], color: unreadBackground, scale: 0.33, offset: 0, autoplaySide: .right)
+            let unread: LAnimationButton = LAnimationButton(animation: !item.markAsUnread ? "anim_read" : "anim_unread", size: NSMakeSize(frame.height, frame.height), keysToColor: !item.markAsUnread ? nil : ["Oval.Oval.Stroke 1"], color: unreadBackground, offset: NSMakeSize(0, 0), autoplaySide: .right)
             let unreadTitle = TextViewLabel()
             unreadTitle.attributedString = .initialize(string: !item.markAsUnread ? L10n.chatListSwipingRead : L10n.chatListSwipingUnread, color: unreadForeground, font: .medium(12))
             unreadTitle.sizeToFit()
@@ -735,7 +660,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                 }
             }
             
-            let mute: LAnimationButton = LAnimationButton(animation: item.isMuted ? "anim_unmute" : "anim_mute", keysToColor: item.isMuted ? nil : ["un Outlines.Group 1.Stroke 1"], color: theme.colors.revealAction_neutral2_background, scale: 0.33, offset: 0, autoplaySide: .right)
+            let mute: LAnimationButton = LAnimationButton(animation: item.isMuted ? "anim_unmute" : "anim_mute", size: NSMakeSize(frame.height, frame.height), keysToColor: item.isMuted ? nil : ["un Outlines.Group 1.Stroke 1"], color: theme.colors.revealAction_neutral2_background, offset: NSMakeSize(0, 0), autoplaySide: .right)
             let muteTitle = TextViewLabel()
             muteTitle.attributedString = .initialize(string: item.isMuted ? L10n.chatListSwipingUnmute : L10n.chatListSwipingMute, color: theme.colors.revealAction_neutral2_foreground, font: .medium(12))
             muteTitle.sizeToFit()
@@ -748,7 +673,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
             }
             
             
-            let pin: LAnimationButton = LAnimationButton(animation: item.pinnedType == .none ? "anim_pin" : "anim_unpin", keysToColor: item.pinnedType == .none ? nil : ["un Outlines.Group 1.Stroke 1"], color: theme.colors.revealAction_constructive_background, scale: 0.33, offset: 0, autoplaySide: .left)
+            let pin: LAnimationButton = LAnimationButton(animation: item.pinnedType == .none ? "anim_pin" : "anim_unpin", size: NSMakeSize(frame.height, frame.height), keysToColor: item.pinnedType == .none ? nil : ["un Outlines.Group 1.Stroke 1"], color: theme.colors.revealAction_constructive_background, offset: NSMakeSize(0, 0), autoplaySide: .left)
             let pinTitle = TextViewLabel()
             pinTitle.attributedString = .initialize(string: item.pinnedType == .none ? L10n.chatListSwipingPin : L10n.chatListSwipingUnpin, color: theme.colors.revealAction_constructive_foreground, font: .medium(12))
             pinTitle.sizeToFit()
@@ -776,7 +701,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
             
             
             
-            let archive: LAnimationButton = LAnimationButton(animation: item.associatedGroupId != .root ? "anim_unarchive" : "anim_archive", keysToColor: ["box2.box2.Fill 1"], color: theme.colors.revealAction_inactive_background, scale: item.associatedGroupId != .root ? 0.2 : 0.33, offset: item.associatedGroupId != .root ? 9.0 : 0.0, autoplaySide: .left)
+            let archive: LAnimationButton = LAnimationButton(animation: item.associatedGroupId != .root ? "anim_unarchive" : "anim_archive", size: item.associatedGroupId != .root ? NSMakeSize(45, 45) : NSMakeSize(frame.height, frame.height), keysToColor: ["box2.box2.Fill 1"], color: theme.colors.revealAction_inactive_background, offset: NSMakeSize(0, item.associatedGroupId != .root ? 9.0 : 0.0), autoplaySide: .left)
             let archiveTitle = TextViewLabel()
             archiveTitle.attributedString = .initialize(string: item.associatedGroupId != .root ? L10n.chatListSwipingUnarchive : L10n.chatListSwipingArchive, color: theme.colors.revealAction_inactive_foreground, font: .medium(12))
             archiveTitle.sizeToFit()
@@ -791,7 +716,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
             
             
             
-            let delete: LAnimationButton = LAnimationButton(animation: "anim_delete", keysToColor: nil, scale: 0.33, offset: 0, autoplaySide: .left)
+            let delete: LAnimationButton = LAnimationButton(animation: "anim_delete", size: NSMakeSize(frame.height, frame.height), keysToColor: nil, offset: NSMakeSize(0, 0), autoplaySide: .left)
             let deleteTitle = TextViewLabel()
             deleteTitle.attributedString = .initialize(string: L10n.chatListSwipingDelete, color: theme.colors.revealAction_destructive_foreground, font: .medium(12))
             deleteTitle.sizeToFit()
@@ -806,27 +731,31 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
             
             archive.set(handler: { [weak self] _ in
                 guard let item = self?.item as? ChatListRowItem else {return}
-                item.toggleArchive()
                 self?.endRevealState = nil
+                item.toggleArchive()
             }, for: .Click)
             
             mute.set(handler: { [weak self] _ in
                 guard let item = self?.item as? ChatListRowItem else {return}
-                item.toggleMuted()
                 self?.endRevealState = nil
+                item.toggleMuted()
             }, for: .Click)
             
             delete.set(handler: { [weak self] _ in
                 guard let item = self?.item as? ChatListRowItem else {return}
-                item.delete()
                 self?.endRevealState = nil
+                item.delete()
             }, for: .Click)
             
             
-            
             revealRightView.addSubview(pin)
+
             revealRightView.addSubview(delete)
-            revealRightView.addSubview(archive)
+            
+            if item.filter == nil {
+                revealRightView.addSubview(archive)
+            }
+            
             
             
             revealLeftView.addSubview(mute)
@@ -835,7 +764,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
             
             
             revealLeftView.backgroundColor = unreadBackground
-            revealRightView.backgroundColor = theme.colors.revealAction_inactive_background
+            revealRightView.backgroundColor = item.filter == nil ? theme.colors.revealAction_inactive_background : theme.colors.revealAction_destructive_background
             
             
             unread.setFrameSize(frame.height, frame.height)
@@ -858,7 +787,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
         } else {
             
             
-            let collapse: LAnimationButton = LAnimationButton(animation: "anim_hide", keysToColor: ["Path 2.Path 2.Fill 1"], color: theme.colors.revealAction_inactive_background, scale: 0.33, offset: 0, autoplaySide: .left)
+            let collapse: LAnimationButton = LAnimationButton(animation: "anim_hide", size: NSMakeSize(frame.height, frame.height), keysToColor: ["Path 2.Path 2.Fill 1"], color: theme.colors.revealAction_inactive_background, offset: NSMakeSize(0, 0), autoplaySide: .left)
             let collapseTitle = TextViewLabel()
             collapseTitle.attributedString = .initialize(string: L10n.chatListRevealActionCollapse, color: theme.colors.revealAction_inactive_foreground, font: .medium(12))
             collapseTitle.sizeToFit()
@@ -891,11 +820,11 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
 
                 switch archiveStatus {
                 case .hidden:
-                    hideOrPin = LAnimationButton(animation: "anim_hide", keysToColor: ["Path 2.Path 2.Fill 1"], color: theme.colors.revealAction_accent_background, scale: 0.33, offset: 20, autoplaySide: .left, rotated: true)
+                    hideOrPin = LAnimationButton(animation: "anim_hide", size: NSMakeSize(frame.height, frame.height), keysToColor: ["Path 2.Path 2.Fill 1"], color: theme.colors.revealAction_accent_background, offset: NSMakeSize(0, 0), autoplaySide: .left, rotated: true)
                     hideOrPinTitle.attributedString = .initialize(string: L10n.chatListRevealActionPin, color: theme.colors.revealAction_accent_foreground, font: .medium(12))
                     hideOrPin.set(background: theme.colors.revealAction_accent_background, for: .Normal)
                 default:
-                    hideOrPin = LAnimationButton(animation: "anim_hide", keysToColor: ["Path 2.Path 2.Fill 1"], color: theme.colors.revealAction_inactive_background, scale: 0.33, offset: 0, autoplaySide: .left, rotated: false)
+                    hideOrPin = LAnimationButton(animation: "anim_hide", size: NSMakeSize(frame.height, frame.height), keysToColor: ["Path 2.Path 2.Fill 1"], color: theme.colors.revealAction_inactive_background, offset: NSMakeSize(0, 0), autoplaySide: .left, rotated: false)
                     hideOrPinTitle.attributedString = .initialize(string: L10n.chatListRevealActionHide, color: theme.colors.revealAction_inactive_foreground, font: .medium(12))
                     hideOrPin.set(background: theme.colors.revealAction_inactive_background, for: .Normal)
                 }
@@ -924,10 +853,7 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
             
         }
         
-        
 
-        
-        needsLayout = true
     }
     
     var additionalRevealDelta: CGFloat {
@@ -1036,9 +962,6 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                 }
             }
         }
-        
-      
-
         
         var rightPercent: CGFloat = delta / rightRevealWidth
         if rightPercent < 0, !revealRightView.subviews.isEmpty {
@@ -1173,7 +1096,6 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
 
                 let duration: Double = 0.2
 
-                
                 containerView.change(pos: NSMakePoint(leftRevealWidth, containerView.frame.minY), animated: true, duration: duration, timingFunction: .spring)
                 revealLeftView.change(size: NSMakeSize(leftRevealWidth, revealLeftView.frame.height), animated: true, duration: duration, timingFunction: .spring)
                 
@@ -1215,12 +1137,26 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
 
                 
                 if invokeRightAction {
-                    animateRightLongReveal({ completed in
-                        if invokeRightAction {
-                            last?.send(event: .Click)
-                            last = nil
-                        }
-                    })
+                    if self.revealRightView.subviews.count < 3 {
+                        failed({ completed in
+                            if invokeRightAction {
+                                DispatchQueue.main.async {
+                                    last?.send(event: .Click)
+                                    last = nil
+                                }
+                            }
+                        })
+                    } else {
+                        animateRightLongReveal({ completed in
+                            if invokeRightAction {
+                                DispatchQueue.main.async {
+                                    last?.send(event: .Click)
+                                    last = nil
+                                }
+                            }
+                        })
+                    }
+                    
                 } else {
                     revealRightView.change(pos: NSMakePoint(frame.width - rightRevealWidth, revealRightView.frame.minY), animated: true, timingFunction: .spring)
                     revealRightView.change(size: NSMakeSize(rightRevealWidth, revealRightView.frame.height), animated: true, timingFunction: .spring)
@@ -1233,8 +1169,11 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                         var _control:Control? = control
                         animateRightLongReveal({ completed in
                             if let control = _control {
-                                handler?(control)
-                                _control = nil
+                                DispatchQueue.main.async {
+                                    handler?(control)
+                                    _control = nil
+                                }
+                               
                             }
                         })
                     }, for: .Click)
@@ -1287,11 +1226,11 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
                 additionalDelta = 0
             }
             
-            
             containerView.frame = NSMakeRect(-additionalDelta, item.isCollapsed ? -70 : 0, frame.width - .borderSize, 70)
             revealLeftView.frame = NSMakeRect(-leftRevealWidth - additionalDelta, 0, leftRevealWidth, frame.height)
             revealRightView.frame = NSMakeRect(frame.width - additionalDelta, 0, rightRevealWidth, frame.height)
         }
     }
+    
     
 }

@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 private let manager = CountryManager()
 
@@ -60,7 +61,7 @@ private class PassportPhoneContainerView : View, NSTextFieldDelegate {
         super.init(frame: frameRect)
         
         
-        countrySelector.style = ControlStyle(font: NSFont.medium(.title), foregroundColor: theme.colors.blueUI, backgroundColor: theme.colors.background)
+        countrySelector.style = ControlStyle(font: NSFont.medium(.title), foregroundColor: theme.colors.accent, backgroundColor: theme.colors.background)
         countrySelector.set(text: "France", for: .Normal)
         _ = countrySelector.sizeToFit()
         addSubview(countrySelector)
@@ -71,7 +72,7 @@ private class PassportPhoneContainerView : View, NSTextFieldDelegate {
             self?.showCountrySelector()
         }, for: .Click)
         
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
         
         codeText.stringValue = "+"
         
@@ -109,8 +110,8 @@ private class PassportPhoneContainerView : View, NSTextFieldDelegate {
         
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
         backgroundColor = theme.colors.background
         
         numberText.placeholderAttributedString = NSAttributedString.initialize(string: tr(L10n.loginPhoneFieldPlaceholder), color: theme.colors.grayText, font: NSFont.normal(.header), coreText: false)
@@ -159,10 +160,10 @@ private class PassportPhoneContainerView : View, NSTextFieldDelegate {
         
         let maxInset: CGFloat = 0
         let contentInset = maxInset
-        countrySelector.setFrameOrigin(contentInset - 2, floorToScreenPixels(scaleFactor: backingScaleFactor, 25 - countrySelector.frame.height/2))
+        countrySelector.setFrameOrigin(contentInset - 2, floorToScreenPixels(backingScaleFactor, 25 - countrySelector.frame.height/2))
 
-        codeText.setFrameOrigin(contentInset, floorToScreenPixels(scaleFactor: backingScaleFactor, 75 - codeText.frame.height/2))
-        numberText.setFrameOrigin(contentInset + separatorInset, floorToScreenPixels(scaleFactor: backingScaleFactor, 75 - codeText.frame.height/2))
+        codeText.setFrameOrigin(contentInset, floorToScreenPixels(backingScaleFactor, 75 - codeText.frame.height/2))
+        numberText.setFrameOrigin(contentInset + separatorInset, floorToScreenPixels(backingScaleFactor, 75 - codeText.frame.height/2))
         errorLabel.centerX(y: 120)
     }
     
@@ -440,7 +441,7 @@ private final class PassportNewPhoneNumberRowView : TableRowView {
     
     override func updateColors() {
         super.updateColors()
-        container.updateLocalizationAndTheme()
+        container.updateLocalizationAndTheme(theme: theme)
     }
     
     required init?(coder: NSCoder) {

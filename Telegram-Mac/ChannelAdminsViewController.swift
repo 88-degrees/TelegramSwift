@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 fileprivate final class ChannelAdminsControllerArguments {
     let context: AccountContext
@@ -42,11 +43,11 @@ fileprivate enum ChannelAdminsEntryStableId: Hashable {
 
 
 fileprivate enum ChannelAdminsEntry : Identifiable, Comparable {
-    case eventLogs(sectionId:Int32)
-    case adminsHeader(sectionId:Int32, String)
-    case adminPeerItem(sectionId:Int32, Int32, RenderedChannelParticipant, ShortPeerDeleting?)
-    case addAdmin(sectionId:Int32)
-    case adminsInfo(sectionId:Int32, String)
+    case eventLogs(sectionId:Int32, GeneralViewType)
+    case adminsHeader(sectionId:Int32, String, GeneralViewType)
+    case adminPeerItem(sectionId:Int32, Int32, RenderedChannelParticipant, ShortPeerDeleting?, GeneralViewType)
+    case addAdmin(sectionId:Int32, GeneralViewType)
+    case adminsInfo(sectionId:Int32, String, GeneralViewType)
     case section(Int32)
     case loading
     var stableId: ChannelAdminsEntryStableId {
@@ -63,7 +64,7 @@ fileprivate enum ChannelAdminsEntry : Identifiable, Comparable {
             return .index(6)
         case let .section(sectionId):
             return .index((sectionId + 1) * 1000 - sectionId)
-        case let .adminPeerItem(_, _, participant, _):
+        case let .adminPeerItem(_, _, participant, _, _):
             return .peer(participant.peer.id)
         }
     }
@@ -73,15 +74,15 @@ fileprivate enum ChannelAdminsEntry : Identifiable, Comparable {
         switch self {
         case .loading:
             return 0
-        case let .eventLogs(sectionId):
+        case let .eventLogs(sectionId, _):
             return (sectionId * 1000) + 1
-        case let .adminsHeader(sectionId, _):
+        case let .adminsHeader(sectionId, _, _):
             return (sectionId * 1000) + 2
-        case let .addAdmin(sectionId):
+        case let .addAdmin(sectionId, _):
             return (sectionId * 1000) + 3
-        case let .adminsInfo(sectionId, _):
+        case let .adminsInfo(sectionId, _, _):
             return (sectionId * 1000) + 4
-        case let .adminPeerItem(sectionId, index, _, _):
+        case let .adminPeerItem(sectionId, index, _, _, _):
             return (sectionId * 1000) + index + 20
         case let .section(sectionId):
             return (sectionId + 1) * 1000 - sectionId
@@ -139,10 +140,9 @@ fileprivate struct ChannelAdminsControllerState: Equatable {
 private func channelAdminsControllerEntries(accountPeerId: PeerId, view: PeerView, state: ChannelAdminsControllerState, participants: [RenderedChannelParticipant]?, isCreator: Bool) -> [ChannelAdminsEntry] {
     var entries: [ChannelAdminsEntry] = []
     
-    guard let participants = participants else {
-        return [.loading]
-    }
+    let participants = participants ?? []
     
+
     var sectionId:Int32 = 1
     
     entries.append(.section(sectionId))
@@ -154,17 +154,17 @@ private func channelAdminsControllerEntries(accountPeerId: PeerId, view: PeerVie
             isGroup = true
         }
         
-        entries.append(.eventLogs(sectionId: sectionId))
+        entries.append(.eventLogs(sectionId: sectionId, .singleItem))
         
         entries.append(.section(sectionId))
         sectionId += 1
         
-        entries.append(.adminsHeader(sectionId: sectionId, isGroup ? L10n.adminsGroupAdmins : L10n.adminsChannelAdmins))
+        entries.append(.adminsHeader(sectionId: sectionId, isGroup ? L10n.adminsGroupAdmins : L10n.adminsChannelAdmins, .textTopItem))
         
         
         if peer.hasPermission(.addAdmins)  {
-            entries.append(.addAdmin(sectionId: sectionId))
-            entries.append(.adminsInfo(sectionId: sectionId, isGroup ? L10n.adminsGroupDescription : L10n.adminsChannelDescription))
+            entries.append(.addAdmin(sectionId: sectionId, .singleItem))
+            entries.append(.adminsInfo(sectionId: sectionId, isGroup ? L10n.adminsGroupDescription : L10n.adminsChannelDescription, .textBottomItem))
             
             entries.append(.section(sectionId))
             sectionId += 1
@@ -172,12 +172,12 @@ private func channelAdminsControllerEntries(accountPeerId: PeerId, view: PeerVie
         
         
         var index: Int32 = 0
-        for participant in participants.sorted(by: <) {
+        for (i, participant) in participants.sorted(by: <).enumerated() {
             var editable = true
             switch participant.participant {
             case .creator:
                 editable = false
-            case let .member(id, _, adminInfo, _):
+            case let .member(id, _, adminInfo, _, _):
                 if id == accountPeerId {
                     editable = false
                 } else if let adminInfo = adminInfo {
@@ -198,20 +198,17 @@ private func channelAdminsControllerEntries(accountPeerId: PeerId, view: PeerVie
                 editing = nil
             }
             
-            entries.append(.adminPeerItem(sectionId: sectionId, index, participant, editing))
+            entries.append(.adminPeerItem(sectionId: sectionId, index, participant, editing, bestGeneralViewType(participants, for: i)))
             index += 1
         }
     } else  if let peer = view.peers[view.peerId] as? TelegramGroup {
         
-        entries.append(.section(sectionId))
-        sectionId += 1
-        
-        entries.append(.adminsHeader(sectionId: sectionId, L10n.adminsGroupAdmins))
+        entries.append(.adminsHeader(sectionId: sectionId, L10n.adminsGroupAdmins, .textTopItem))
         
         
-        if peer.role == .creator {
-            entries.append(.addAdmin(sectionId: sectionId))
-            entries.append(.adminsInfo(sectionId: sectionId, L10n.adminsGroupDescription))
+        if case .creator = peer.role {
+            entries.append(.addAdmin(sectionId: sectionId, .singleItem))
+            entries.append(.adminsInfo(sectionId: sectionId, L10n.adminsGroupDescription, .textBottomItem))
             
             entries.append(.section(sectionId))
             sectionId += 1
@@ -237,11 +234,15 @@ private func channelAdminsControllerEntries(accountPeerId: PeerId, view: PeerVie
                 switch participant.participant {
                 case .creator:
                     editable = false
-                case let .member(id, _, adminInfo, _):
+                case let .member(id, _, adminInfo, _, _):
                     if id == accountPeerId {
                         editable = false
                     } else if let adminInfo = adminInfo {
-                        if peer.role == .creator || adminInfo.promotedBy == accountPeerId {
+                        var creator: Bool = false
+                        if case .creator = peer.role {
+                            creator = true
+                        }
+                        if creator || adminInfo.promotedBy == accountPeerId {
                             editable = true
                         } else {
                             editable = false
@@ -256,7 +257,7 @@ private func channelAdminsControllerEntries(accountPeerId: PeerId, view: PeerVie
                 } else {
                     editing = nil
                 }
-                entries.append(.adminPeerItem(sectionId: sectionId, index, participant, editing))
+                entries.append(.adminPeerItem(sectionId: sectionId, index, participant, editing, .singleItem))
                 index += 1
             }
         }
@@ -270,12 +271,12 @@ fileprivate func prepareTransition(left:[AppearanceWrapperEntry<ChannelAdminsEnt
     
     let (removed, inserted, updated) = proccessEntriesWithoutReverse(left, right: right) { entry -> TableRowItem in
         switch entry.entry {
-        case let .adminPeerItem(_, _, participant, editing):
+        case let .adminPeerItem(_, _, participant, editing, viewType):
             let peerText: String
             switch participant.participant {
             case .creator:
-                peerText = L10n.adminsCreator
-            case let .member(_, _, adminInfo, _):
+                peerText = L10n.adminsOwner
+            case let .member(_, _, adminInfo, _, _):
                 if let adminInfo = adminInfo, let peer = participant.peers[adminInfo.promotedBy] {
                     peerText =  L10n.channelAdminsPromotedBy(peer.displayTitle)
                 } else {
@@ -293,28 +294,26 @@ fileprivate func prepareTransition(left:[AppearanceWrapperEntry<ChannelAdminsEnt
                 interactionType = .plain
             }
             
-            return ShortPeerRowItem(initialSize, peer: participant.peer, account: arguments.context.account, stableId: entry.stableId, status: peerText, drawLastSeparator: true, inset: NSEdgeInsets(left: 30, right: 30), interactionType: interactionType, generalType: .none, action: {
+            return ShortPeerRowItem(initialSize, peer: participant.peer, account: arguments.context.account, stableId: entry.stableId, status: peerText, inset: NSEdgeInsets(left: 30, right: 30), interactionType: interactionType, generalType: .none, viewType: viewType, action: {
                 if editing == nil {
                     arguments.openAdmin(participant)
                 }
             })
 
-        case .addAdmin:
-            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: tr(L10n.adminsAddAdmin),  nameStyle: blueActionButton, type: .next, action: {
-                 arguments.addAdmin()
-            })
-        case .eventLogs:
-            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: tr(L10n.channelAdminsRecentActions), type: .next, action: {
+        case let .addAdmin(_, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: L10n.adminsAddAdmin,  nameStyle: blueActionButton, type: .next, viewType: viewType, action: arguments.addAdmin)
+        case let .eventLogs(_, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: L10n.channelAdminsRecentActions, type: .next, viewType: viewType, action: {
                 arguments.eventLogs()
             })
         case .section:
-            return GeneralRowItem(initialSize, height: 20, stableId: entry.stableId)
+            return GeneralRowItem(initialSize, height: 30, stableId: entry.stableId, viewType: .separator)
         case .loading:
             return SearchEmptyRowItem(initialSize, stableId: entry.stableId, isLoading: true)
-        case let .adminsHeader(_, text):
-            return GeneralTextRowItem(initialSize, stableId: entry.stableId, text: text)
-        case let .adminsInfo(_, text):
-            return GeneralTextRowItem(initialSize, stableId: entry.stableId, text: text)
+        case let .adminsHeader(_, text, viewType):
+        return GeneralTextRowItem(initialSize, stableId: entry.stableId, text: text, viewType: viewType)
+        case let .adminsInfo(_, text, viewType):
+            return GeneralTextRowItem(initialSize, stableId: entry.stableId, text: text, viewType: viewType)
         }
     }
     
@@ -344,6 +343,10 @@ class ChannelAdminsViewController: EditableViewController<TableView> {
     override func viewDidLoad() {
         super.viewDidLoad()
         
+        genericView.getBackgroundColor = {
+            theme.colors.listBackground
+        }
+        
         let context = self.context
         let peerId = self.peerId
         
@@ -369,28 +372,20 @@ class ChannelAdminsViewController: EditableViewController<TableView> {
         let arguments = ChannelAdminsControllerArguments(context: context, addAdmin: {
             let behavior = peerId.namespace == Namespaces.Peer.CloudGroup ? SelectGroupMembersBehavior(peerId: peerId, limit: 1) : SelectChannelMembersBehavior(peerId: peerId, limit: 1)
             
-            _ = (selectModalPeers(context: context, title: "", limit: 1, behavior: behavior, confirmation: { peerIds in
-                if let participant = behavior.participants[peerId] {
-                    switch participant.participant {
-                    case .creator:
-                        return .single(false)
-                    case .member:
-                        return .single(true)
-                    }
+            _ = (selectModalPeers(context: context, title: L10n.adminsAddAdmin, limit: 1, behavior: behavior, confirmation: { peerIds in
+                if let _ = behavior.participants[peerId] {
+                     return .single(true)
                 } else {
                     return .single(true)
                 }
             }) |> map {$0.first}).start(next: { adminId in
                 if let adminId = adminId {
-                    
                     showModal(with: ChannelAdminController(context, peerId: peerId, adminId: adminId, initialParticipant: behavior.participants[adminId]?.participant, updated: { _ in }, upgradedToSupergroup: upgradedToSupergroup), for: mainWindow)
                 }
             })
         
         }, openAdmin: { participant in
-            if participant.peer.id != context.peerId {
-                showModal(with: ChannelAdminController(context, peerId: peerId, adminId: participant.peer.id, initialParticipant: participant.participant, updated: { _ in }, upgradedToSupergroup: upgradedToSupergroup), for: mainWindow)
-            }
+            showModal(with: ChannelAdminController(context, peerId: peerId, adminId: participant.peer.id, initialParticipant: participant.participant, updated: { _ in }, upgradedToSupergroup: upgradedToSupergroup), for: mainWindow)
         }, removeAdmin: { [weak self] adminId in
             
             updateState {
@@ -404,7 +399,7 @@ class ChannelAdminsViewController: EditableViewController<TableView> {
                         }
                     }))
             } else {
-                self?.removeAdminDisposable.set((context.peerChannelMemberCategoriesContextsManager.updateMemberAdminRights(account: context.account, peerId: peerId, memberId: adminId, adminRights: TelegramChatAdminRights(flags: []))
+                self?.removeAdminDisposable.set((context.peerChannelMemberCategoriesContextsManager.updateMemberAdminRights(account: context.account, peerId: peerId, memberId: adminId, adminRights: TelegramChatAdminRights(flags: []), rank: nil)
                     |> deliverOnMainQueue).start(completed: {
                         updateState {
                             return $0.withUpdatedRemovingPeerId(nil)
@@ -455,12 +450,12 @@ class ChannelAdminsViewController: EditableViewController<TableView> {
                         if let peer = peerView.peers[participant.peerId] {
                             switch participant {
                             case .creator:
-                                result.append(RenderedChannelParticipant(participant: .creator(id: peer.id), peer: peer))
+                                result.append(RenderedChannelParticipant(participant: .creator(id: peer.id, rank: nil), peer: peer))
                             case .admin:
                                 var peers: [PeerId: Peer] = [:]
                                 peers[creator.id] = creator
                                 peers[peer.id] = peer
-                                result.append(RenderedChannelParticipant(participant: .member(id: peer.id, invitedAt: 0, adminInfo: ChannelParticipantAdminInfo(rights: TelegramChatAdminRights(flags: .groupSpecific), promotedBy: creator.id, canBeEditedByAccountPeer: creator.id == context.account.peerId), banInfo: nil), peer: peer, peers: peers))
+                                result.append(RenderedChannelParticipant(participant: .member(id: peer.id, invitedAt: 0, adminInfo: ChannelParticipantAdminInfo(rights: TelegramChatAdminRights(flags: .groupSpecific), promotedBy: creator.id, canBeEditedByAccountPeer: creator.id == context.account.peerId), banInfo: nil, rank: nil), peer: peer, peers: peers))
                             case .member:
                                 break
                             }
@@ -516,6 +511,7 @@ class ChannelAdminsViewController: EditableViewController<TableView> {
             
             _ = signal.start(completed: { [weak navigationController] in
                 navigationController?.push(ChannelAdminsViewController(context, peerId: upgradedPeerId), false, style: .none)
+                f()
             })
             
         }

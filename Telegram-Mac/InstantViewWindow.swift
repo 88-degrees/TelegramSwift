@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 private final class InstantViewArguments {
     let context: AccountContext
     let share:()->Void
@@ -60,7 +61,7 @@ private class HeaderView : View {
     }
     
     private func initialize() {
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
         addSubview(borderView)
         addSubview(share)
         addSubview(actions)
@@ -143,8 +144,9 @@ private class HeaderView : View {
         back.centerY(x: 86)
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         borderView.backgroundColor = theme.colors.border
         backgroundColor = theme.colors.background
         titleView?.backgroundColor = theme.colors.background
@@ -195,8 +197,8 @@ class InstantWindowContentView : View {
         layout()
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
         contentView.backgroundColor = theme.colors.background
         backgroundColor = theme.colors.background
         loadingIndicatorView.style = ControlStyle(foregroundColor: theme.colors.text, backgroundColor: backgroundColor)
@@ -252,7 +254,7 @@ class InstantViewController : TelegramGenericViewController<InstantWindowContent
         self.page = page
         
         let height = (screen.frame.height * 0.7)
-        let center = NSMakeRect(floorToScreenPixels(scaleFactor: System.backingScale, (screen.frame.width - 720)/2), floorToScreenPixels(scaleFactor: System.backingScale, (screen.frame.height - height)/2), 720, height)
+        let center = NSMakeRect(floorToScreenPixels(System.backingScale, (screen.frame.width - 720)/2), floorToScreenPixels(System.backingScale, (screen.frame.height - height)/2), 720, height)
         
         _window = Window(contentRect: center, styleMask: [.closable, .resizable, .miniaturizable, .fullSizeContentView, .titled, .unifiedTitleAndToolbar, .texturedBackground], backing: .buffered, defer: true)
         navigation = MajorNavigationController(ViewController.self, page, _window)
@@ -437,8 +439,9 @@ class InstantViewController : TelegramGenericViewController<InstantWindowContent
         }
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         _window.appearance = theme.appearance
         _window.backgroundColor = theme.colors.grayBackground
     }
@@ -452,12 +455,14 @@ class InstantViewController : TelegramGenericViewController<InstantWindowContent
                 if !NSEqualRects(frame, titleView.frame) {
                     titleView.frame = frame
                 }
-                if let controls = (HackUtils.findElements(byClass: "NSTitlebarView", in: titleView)?.first as? NSView)?.subviews {
-                    var xs:[CGFloat] = [18, 58, 38]
-                    for i in 0 ..< min(controls.count, xs.count) {
-                        let view = controls[i]
-                        view.setFrameOrigin(xs[i], floorToScreenPixels(scaleFactor: System.backingScale, (barHeight - view.frame.height)/2))
-                    }
+                let xs:[CGFloat] = [18, 58, 38]
+                let first = ObjcUtils.findElements(byClass: "_NSThemeCloseWidget", in: windowView).first
+                let second = ObjcUtils.findElements(byClass: "_NSThemeZoomWidget", in: windowView).first
+                let thrid = ObjcUtils.findElements(byClass: "_NSThemeWidget", in: windowView).first
+                let values:[NSView] = [first, second, thrid].compactMap { $0 }
+                for i in 0 ..< min(values.count, xs.count) {
+                    let view = values[i]
+                    view.setFrameOrigin(xs[i], floorToScreenPixels(System.backingScale, (barHeight - view.frame.height)/2))
                 }
             }
         }
@@ -518,3 +523,7 @@ func showInstantPage(_ page: InstantPageViewController) {
     }
 }
 
+func closeInstantView() {
+    instantController?.window?.orderOut(nil)
+    instantController = nil
+}

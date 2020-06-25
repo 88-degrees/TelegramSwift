@@ -9,7 +9,8 @@
 import Cocoa
 import TGUIKit
 import Contacts
-import TelegramCoreMac
+import TelegramCore
+import SyncCore
 
 class VCardLocationRowItem: GeneralRowItem {
     fileprivate let address: CNLabeledValue<CNPostalAddress>
@@ -19,7 +20,7 @@ class VCardLocationRowItem: GeneralRowItem {
         let attr = NSMutableAttributedString()
         
         if let label = address.label {
-            _ = attr.append(string: label, color: theme.colors.blueUI, font: .normal(.text))
+            _ = attr.append(string: label, color: theme.colors.accent, font: .normal(.text))
             _ = attr.append(string: "\n\n")
         }
         

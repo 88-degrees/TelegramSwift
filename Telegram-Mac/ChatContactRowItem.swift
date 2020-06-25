@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import Contacts
 
 class ChatContactRowItem: ChatRowItem {
@@ -21,7 +22,7 @@ class ChatContactRowItem: ChatRowItem {
     let vCard: CNContact?
     let contact: TelegramMediaContact
     let appearance: WPLayoutPresentation
-    override init(_ initialSize: NSSize, _ chatInteraction: ChatInteraction, _ context: AccountContext, _ object: ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings) {
+    override init(_ initialSize: NSSize, _ chatInteraction: ChatInteraction, _ context: AccountContext, _ object: ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings, theme: TelegramPresentationTheme) {
         
         if let message = object.message, let contact = message.media[0] as? TelegramMediaContact {
             let attr = NSMutableAttributedString()
@@ -29,7 +30,7 @@ class ChatContactRowItem: ChatRowItem {
             let isIncoming: Bool = message.isIncoming(context.account, object.renderType == .bubble)
 
             
-            self.appearance = WPLayoutPresentation(text: theme.chat.textColor(isIncoming, object.renderType == .bubble), activity: theme.chat.webPreviewActivity(isIncoming, object.renderType == .bubble), link: theme.chat.linkColor(isIncoming, object.renderType == .bubble), selectText: theme.chat.selectText(isIncoming, object.renderType == .bubble), ivIcon: theme.chat.instantPageIcon(isIncoming, object.renderType == .bubble), renderType: object.renderType)
+            self.appearance = WPLayoutPresentation(text: theme.chat.textColor(isIncoming, object.renderType == .bubble), activity: theme.chat.webPreviewActivity(isIncoming, object.renderType == .bubble), link: theme.chat.linkColor(isIncoming, object.renderType == .bubble), selectText: theme.chat.selectText(isIncoming, object.renderType == .bubble), ivIcon: theme.chat.instantPageIcon(isIncoming, object.renderType == .bubble, presentation: theme), renderType: object.renderType)
 
             
             if let vCard = contact.vCardData?.data(using: .utf8) {
@@ -63,7 +64,7 @@ class ChatContactRowItem: ChatRowItem {
             fatalError("contact not found for item")
         }
         
-        super.init(initialSize, chatInteraction, context, object, downloadSettings)
+        super.init(initialSize, chatInteraction, context, object, downloadSettings, theme: theme)
     }
     
     override var additionalLineForDateInBubbleState: CGFloat? {

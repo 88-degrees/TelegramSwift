@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 
 
 class ChatInputAttachView: ImageButton, Notifable {
@@ -30,11 +31,6 @@ class ChatInputAttachView: ImageButton, Notifable {
         
         updateLayout()
         
-        set(handler: { (event) in
-            
-        }, for: .Click)
-        
-        
         
         set(handler: { [weak self] control in
             
@@ -42,8 +38,6 @@ class ChatInputAttachView: ImageButton, Notifable {
             if let peer = chatInteraction.presentation.peer {
                 
                 var items:[SPopoverItem] = []
-
-                
                 if let editState = chatInteraction.presentation.interfaceState.editState, let media = editState.originalMedia, media is TelegramMediaFile || media is TelegramMediaImage {
                     
                     items.append(SPopoverItem(L10n.inputAttachPopoverPhotoOrVideo, { [weak self] in
@@ -64,6 +58,12 @@ class ChatInputAttachView: ImageButton, Notifable {
                     
                     
                 } else if chatInteraction.presentation.interfaceState.editState == nil {
+                    
+                    if let slowMode = self.chatInteraction.presentation.slowMode, slowMode.hasLocked {
+                        showSlowModeTimeoutTooltip(slowMode, for: control)
+                        return
+                    }
+                    
                     items.append(SPopoverItem(L10n.inputAttachPopoverPhotoOrVideo, { [weak self] in
                         if let permissionText = permissionText(from: peer, for: .banSendMedia) {
                             alert(for: mainWindow, info: permissionText)
@@ -85,10 +85,17 @@ class ChatInputAttachView: ImageButton, Notifable {
                     if let peer = chatInteraction.presentation.peer, peer.isGroup || peer.isSupergroup {
                         canAttachPoll = true
                     }
+                    if let peer = chatInteraction.presentation.mainPeer, peer.isBot {
+                        canAttachPoll = true
+                    }
+                    
                     if let peer = chatInteraction.presentation.peer as? TelegramChannel {
                         if peer.hasPermission(.sendMessages) {
                             canAttachPoll = true
                         }
+                    }
+                    if canAttachPoll && permissionText(from: peer, for: .banSendPolls) != nil {
+                        canAttachPoll = false
                     }
                    
                     if canAttachPoll {
@@ -124,16 +131,25 @@ class ChatInputAttachView: ImageButton, Notifable {
             }
         }, for: .Hover)
         
-        set(handler: { [weak self] _ in
+        set(handler: { [weak self] control in
             guard let `self` = self else {return}
-            if let peer = self.chatInteraction.presentation.peer, self.chatInteraction.presentation.interfaceState.editState == nil {
+            
+            if let editState = chatInteraction.presentation.interfaceState.editState {
+                return
+            }
+            
+            if let peer = self.chatInteraction.presentation.peer {
                 if let permissionText = permissionText(from: peer, for: .banSendMedia) {
                     alert(for: mainWindow, info: permissionText)
                     return
                 }
                 self.controller?.popover?.hide()
                 Queue.mainQueue().justDispatch {
-                    self.chatInteraction.attachFile(true)
+                    if self.chatInteraction.presentation.interfaceState.editState != nil {
+                        self.chatInteraction.updateEditingMessageMedia(nil, true)
+                    } else {
+                        self.chatInteraction.attachFile(true)
+                    }
                 }
             }
         }, for: .Click)
@@ -141,7 +157,7 @@ class ChatInputAttachView: ImageButton, Notifable {
         chatInteraction.add(observer: self)
         addSubview(editMediaAccessory)
         editMediaAccessory.layer?.opacity = 0
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
     }
     
     func isEqual(to other: Notifable) -> Bool {
@@ -168,6 +184,13 @@ class ChatInputAttachView: ImageButton, Notifable {
                 self.autohighlight = true
             }
         }
+       
+//        if let slowMode = value?.slowMode {
+//            if slowMode.hasError  {
+//                self.highlightHovered = false
+//                self.autohighlight = false
+//            }
+//        }
     }
     
     override func layout() {
@@ -179,8 +202,9 @@ class ChatInputAttachView: ImageButton, Notifable {
         chatInteraction.remove(observer: self)
     }
 
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         editMediaAccessory.image = theme.icons.editMessageMedia
         editMediaAccessory.sizeToFit()
         set(image: theme.icons.chatAttach, for: .Normal)

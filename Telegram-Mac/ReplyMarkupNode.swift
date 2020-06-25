@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import TelegramCoreMac
+import TelegramCore
+import SyncCore
 import TGUIKit
-import PostboxMac
-import SwiftSignalKitMac
+import Postbox
+import SwiftSignalKit
 
 
 class ReplyMarkupButtonLayout {
@@ -23,12 +24,17 @@ class ReplyMarkupButtonLayout {
     init(button:ReplyMarkupButton, style:ControlStyle = ControlStyle(backgroundColor: theme.colors.grayForeground, highlightColor: theme.colors.text), isInput: Bool) {
         self.button = button
         self.style = style
-        self.text = TextViewLayout(NSAttributedString.initialize(string: button.title.fixed, color: theme.backgroundMode.hasWallpapaer && !isInput ? theme.chatServiceItemTextColor : theme.colors.text, font: .normal(.short)), maximumNumberOfLines: 1, truncationType: .middle, cutout: nil, alignment: .center)
+        self.text = TextViewLayout(NSAttributedString.initialize(string: button.title.fixed, color: theme.controllerBackgroundMode.hasWallpapaer && !isInput ? theme.chatServiceItemTextColor : theme.colors.text, font: .normal(.short)), maximumNumberOfLines: 1, truncationType: .middle, cutout: nil, alignment: .center)
     }
     
     func measure(_ width:CGFloat) {
         text.measure(width: width - 8)
         self.width = width
+    }
+    
+    deinit {
+        var bp:Int = 0
+        bp += 1
     }
     
 }
@@ -68,7 +74,13 @@ class ReplyMarkupNode: Node {
                 
                 var urlView:ImageView?
                 switch button.button.action {
-                case .url, .switchInline:
+                case let .url(url):
+                    if !url.isSingleEmoji {
+                        urlView = ImageView()
+                        urlView?.image = theme.icons.chatActionUrl
+                        urlView?.sizeToFit()
+                    }
+                case .switchInline:
                     urlView = ImageView()
                     urlView?.image = theme.icons.chatActionUrl
                     urlView?.sizeToFit()
@@ -77,8 +89,10 @@ class ReplyMarkupNode: Node {
                 }
                 
                 let btnView = TextView()
-                btnView.set(handler: { [weak self] _ in
-                    self?.proccess(btnView,button.button)
+                btnView.set(handler: { [weak self, weak button] control in
+                    if let button = button {
+                        self?.proccess(control, button.button)
+                    }
                 }, for: .Click)
                 
                 btnView.set(handler: { control in
@@ -107,8 +121,8 @@ class ReplyMarkupNode: Node {
     }
     
     func proccess(_ control:Control, _ button:ReplyMarkupButton) {
-        interactions.proccess(button, { loading in
-            control.backgroundColor = loading ? .black : theme.colors.grayBackground
+        interactions.proccess(button, { [weak control] loading in
+           // control?.backgroundColor = loading ? .black : theme.colors.grayBackground
         })
     }
     
@@ -126,7 +140,7 @@ class ReplyMarkupNode: Node {
                 }
                 rect.size = NSMakeSize(w, ReplyMarkupNode.buttonHeight)
                 let button:View? = view?.subviews[i] as? View
-                button?.backgroundColor = theme.backgroundMode.hasWallpapaer && !isInput ? theme.chatServiceItemColor : theme.colors.grayBackground
+                button?.backgroundColor = theme.controllerBackgroundMode.hasWallpapaer && !isInput ? theme.chatServiceItemColor : theme.colors.grayBackground
                 if let button = button {
                     button.frame = rect
                     button.setNeedsDisplayLayer()
@@ -150,7 +164,7 @@ class ReplyMarkupNode: Node {
     override func measureSize(_ width: CGFloat) {
         for row in markup {
             let count = row.count
-            let single:CGFloat = floorToScreenPixels(scaleFactor: System.backingScale, (width - CGFloat(6 * (count - 1))) / CGFloat(count))
+            let single:CGFloat = floorToScreenPixels(System.backingScale, (width - CGFloat(6 * (count - 1))) / CGFloat(count))
             for button in row {
                 button.measure(single)
             }

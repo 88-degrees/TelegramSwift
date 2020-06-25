@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import PostboxMac
-import TelegramCoreMac
+import Postbox
+import TelegramCore
+import SyncCore
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 
 class ChatInputAccessory: Node {
@@ -38,7 +39,7 @@ class ChatInputAccessory: Node {
             self?.chatInteraction.update({$0.updatedInterfaceState({$0.withUpdatedReplyMessageId(nil).withUpdatedDismissedForceReplyId($0.replyMessageId)})})
         }
         dismissEdit = { [weak self] in
-            self?.chatInteraction.update({$0.withoutEditMessage()})
+            self?.chatInteraction.cancelEditing()
         }
         dismissUrlPreview = { [weak self] in
             self?.chatInteraction.update({ state -> ChatPresentationInterfaceState in
@@ -72,6 +73,8 @@ class ChatInputAccessory: Node {
         displayNode = nil
         dismiss.removeAllHandlers()
         container.removeAllHandlers()
+        
+
         if let urlPreview = state.urlPreview, state.interfaceState.composeDisableUrlPreview != urlPreview.0, let peer = state.peer, !peer.webUrlRestricted {
             displayNode = ChatUrlPreviewModel(account: account, webpage: urlPreview.1, url:urlPreview.0)
             dismiss.set(handler: { [weak self ] _ in
@@ -89,15 +92,21 @@ class ChatInputAccessory: Node {
                 self?.dismiss.send(event: .Click)
             }, for: .Click)
             
-        } else if !state.interfaceState.forwardMessageIds.isEmpty {
-            displayNode = ForwardPanelModel(forwardIds:state.interfaceState.forwardMessageIds,account:account)
+        } else if !state.interfaceState.forwardMessages.isEmpty && !state.interfaceState.forwardMessageIds.isEmpty {
+            displayNode = ForwardPanelModel(forwardMessages:state.interfaceState.forwardMessages,account:account)
             dismiss.set(handler: { [weak self] _ in
                 self?.dismissForward()
             }, for: .Click)
             
             container.set(handler: { [weak self] _ in
-                self?.chatInteraction.forwardMessages(state.interfaceState.forwardMessageIds)
-                self?.chatInteraction.update({$0.updatedInterfaceState({$0.withoutForwardMessages()})})
+                guard let context = self?.chatInteraction.context else {
+                    return
+                }
+                let fwdMessages = state.interfaceState.forwardMessageIds
+                showModal(with: ShareModalController(ForwardMessagesObject(context, messageIds: fwdMessages, emptyPerformOnClose: true)), for: context.window)
+                delay(0.15, closure: {
+                    self?.chatInteraction.update({$0.updatedInterfaceState({$0.withoutForwardMessages()})})
+                })
             }, for: .Click)
             
         } else if let replyMessageId = state.interfaceState.replyMessageId {
@@ -107,7 +116,7 @@ class ChatInputAccessory: Node {
             }, for: .Click)
             
             container.set(handler: { [weak self] _ in
-               self?.chatInteraction.focusMessageId(nil, replyMessageId, .center(id: 0, innerId: nil, animated: true, focus: true, inset: 0))
+               self?.chatInteraction.focusMessageId(nil, replyMessageId, .center(id: 0, innerId: nil, animated: true, focus: .init(focus: true), inset: 0))
             }, for: .Click)
         }
         
@@ -139,13 +148,13 @@ class ChatInputAccessory: Node {
                 progress = indicator
                 view?.addSubview(indicator)
             }
-            indicator.progressColor = theme.colors.blueUI
+            indicator.progressColor = theme.colors.text
         case let .progress(progress):
             let radial: RadialProgressView
             if let _radial = self.progress as? RadialProgressView {
                 radial = _radial
             } else {
-                radial = RadialProgressView(theme: RadialProgressTheme(backgroundColor: .clear, foregroundColor: theme.colors.blueUI), twist: true, size: NSMakeSize(20, 20))
+                radial = RadialProgressView(theme: RadialProgressTheme(backgroundColor: .clear, foregroundColor: theme.colors.accent), twist: true, size: NSMakeSize(20, 20))
                 self.progress = radial
                 view?.addSubview(radial)
             }

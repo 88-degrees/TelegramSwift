@@ -8,21 +8,22 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 class ChatServiceItem: ChatRowItem {
 
     let text:TextViewLayout
     private(set) var imageArguments:TransformImageArguments?
     private(set) var image:TelegramMediaImage?
     
-    override init(_ initialSize:NSSize, _ chatInteraction:ChatInteraction, _ context: AccountContext, _ entry: ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings) {
+    override init(_ initialSize:NSSize, _ chatInteraction:ChatInteraction, _ context: AccountContext, _ entry: ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings, theme: TelegramPresentationTheme) {
         let message:Message = entry.message!
         
         
         
-        let linkColor: NSColor = theme.backgroundMode.hasWallpapaer ? theme.chatServiceItemTextColor : entry.renderType == .bubble ? theme.chat.linkColor(true, entry.renderType == .bubble) : theme.colors.link
+        let linkColor: NSColor = theme.controllerBackgroundMode.hasWallpapaer ? theme.chatServiceItemTextColor : entry.renderType == .bubble ? theme.chat.linkColor(true, entry.renderType == .bubble) : theme.colors.link
         let grayTextColor: NSColor = theme.chatServiceItemTextColor
 
         let authorId:PeerId? = message.author?.id
@@ -36,7 +37,7 @@ class ChatServiceItem: ChatRowItem {
         
         let nameColor:(PeerId) -> NSColor = { peerId in
             
-            if theme.backgroundMode.hasWallpapaer {
+            if theme.controllerBackgroundMode.hasWallpapaer {
                 return theme.chatServiceItemTextColor
             }
             
@@ -161,7 +162,7 @@ class ChatServiceItem: ChatRowItem {
                     if pinnedRange.location != NSNotFound {
                         attributedString.add(link: inAppLink.callback("", { [weak chatInteraction] _ in
                             if let pinnedId = pinnedId {
-                                chatInteraction?.focusMessageId(nil, pinnedId, .center(id: 0, innerId: nil, animated: true, focus: true, inset: 0))
+                                chatInteraction?.focusMessageId(nil, pinnedId, .center(id: 0, innerId: nil, animated: true, focus: .init(focus: true), inset: 0))
                             }
                         }), for: pinnedRange, color: grayTextColor)
                         attributedString.addAttribute(NSAttributedString.Key.font, value: NSFont.medium(theme.fontSize), range: pinnedRange)
@@ -314,7 +315,7 @@ class ChatServiceItem: ChatRowItem {
         text = TextViewLayout(attributedString, truncationType: .end, cutout: nil, alignment: .center)
         text.mayItems = false
         text.interactions = globalLinkExecutor
-        super.init(initialSize, chatInteraction, entry, downloadSettings)
+        super.init(initialSize, chatInteraction, entry, downloadSettings, theme: theme)
     }
     
     override func makeContentSize(_ width: CGFloat) -> NSSize {
@@ -322,7 +323,7 @@ class ChatServiceItem: ChatRowItem {
     }
     
     override var isBubbled: Bool {
-        return theme.wallpaper != .none
+        return presentation.wallpaper.wallpaper != .none
     }
     
     override var height: CGFloat {
@@ -378,7 +379,8 @@ class ChatServiceRowView: TableRowView {
         textView = TextView()
         textView.isSelectable = false
         //textView.userInteractionEnabled = false
-        textView.isEventLess = true
+        //do not enable
+       // textView.isEventLess = true
         super.init(frame: frameRect)
         //layerContentsRedrawPolicy = .onSetNeedsDisplay
         addSubview(textView)
@@ -386,7 +388,7 @@ class ChatServiceRowView: TableRowView {
     
     override var backdorColor: NSColor {
         if let item = item as? ChatServiceItem {
-            return item.isBubbled ? .clear : theme.colors.background
+            return item.isBubbled ? .clear : theme.chatBackground
         } else {
             return .clear
         }
@@ -446,11 +448,9 @@ class ChatServiceRowView: TableRowView {
                     self.addSubview(imageView!)
                 }
                 imageView?.setSignal(signal: cachedMedia(media: image, arguments: arguments, scale: backingScaleFactor))
-                imageView?.setSignal( chatMessagePhoto(account: item.context.account, imageReference: ImageMediaReference.message(message: MessageReference(item.message!), media: image), toRepresentationSize:NSMakeSize(100,100), scale: backingScaleFactor), cacheImage: { [weak self] signal in
-                    if let strongSelf = self {
-                        return cacheMedia(signal: signal, media: image, arguments: arguments, scale: strongSelf.backingScaleFactor, positionFlags: nil)
-                    } else {
-                        return .complete()
+                imageView?.setSignal( chatMessagePhoto(account: item.context.account, imageReference: ImageMediaReference.message(message: MessageReference(item.message!), media: image), toRepresentationSize:NSMakeSize(100,100), scale: backingScaleFactor), cacheImage: { [weak image] result in
+                    if let media = image {
+                        cacheMedia(result, media: media, arguments: arguments, scale: System.backingScale, positionFlags: nil)
                     }
                 })
                 

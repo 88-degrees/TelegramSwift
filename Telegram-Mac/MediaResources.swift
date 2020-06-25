@@ -8,8 +8,9 @@
 
 import Cocoa
 
-import PostboxMac
-import TelegramCoreMac
+import Postbox
+import TelegramCore
+import SyncCore
 
 public final class VideoMediaResourceAdjustments: PostboxCoding, Equatable {
     let data: MemoryBuffer
@@ -210,6 +211,60 @@ public final class LocalFileVideoMediaResource: TelegramMediaResource {
     
 }
 
+public struct LottieSoundMediaResourceId: MediaResourceId {
+    public let randomId: Int64
+    
+    public var uniqueId: String {
+        return "lottie-sound-\(self.randomId)"
+    }
+    
+    public var hashValue: Int {
+        return self.randomId.hashValue
+    }
+    
+    public func isEqual(to: MediaResourceId) -> Bool {
+        if let to = to as? LottieSoundMediaResourceId {
+            return self.randomId == to.randomId
+        } else {
+            return false
+        }
+    }
+}
+
+public final class LottieSoundMediaResource: TelegramMediaResource {
+    
+    public func isEqual(to: MediaResource) -> Bool {
+        if let to = to as? LottieSoundMediaResource {
+            return self.randomId == to.randomId && self.data == to.data
+        } else {
+            return false
+        }
+    }
+    
+    public let randomId: Int64
+    public let data: Data
+    
+    public init(randomId: Int64, data: Data) {
+        self.randomId = randomId
+        self.data = data
+    }
+    
+    public required init(decoder: PostboxDecoder) {
+        self.randomId = decoder.decodeInt64ForKey("i", orElse: 0)
+        self.data = decoder.decodeDataForKey("d") ?? Data()
+    }
+    
+    public func encode(_ encoder: PostboxEncoder) {
+        encoder.encodeInt64(self.randomId, forKey: "i")
+        encoder.encodeData(self.data, forKey: "d")
+    }
+    
+    public var id: MediaResourceId {
+        return LottieSoundMediaResourceId(randomId: self.randomId)
+    }
+    
+}
+
 
 
 public struct LocalFileArchiveMediaResourceId: MediaResourceId {
@@ -322,6 +377,60 @@ public class ExternalMusicAlbumArtResource: TelegramMediaResource {
     public func isEqual(to: MediaResource) -> Bool {
         if let to = to as? ExternalMusicAlbumArtResource {
             return self.title == to.title && self.performer == to.performer && self.isThumbnail == to.isThumbnail
+        } else {
+            return false
+        }
+    }
+}
+
+
+public struct LocalBundleResourceId: MediaResourceId {
+    public let name: String
+    public let ext: String
+    
+    public var uniqueId: String {
+        return "local-bundle-\(self.name)-\(self.ext)"
+    }
+    
+    public var hashValue: Int {
+        return self.name.hashValue
+    }
+    
+    public func isEqual(to: MediaResourceId) -> Bool {
+        if let to = to as? LocalBundleResourceId {
+            return self.name == to.name && self.ext == to.ext
+        } else {
+            return false
+        }
+    }
+}
+
+public class LocalBundleResource: TelegramMediaResource {
+    public let name: String
+    public let ext: String
+    
+    public init(name: String, ext: String) {
+        self.name = name
+        self.ext = ext
+    }
+    
+    public required init(decoder: PostboxDecoder) {
+        self.name = decoder.decodeStringForKey("n", orElse: "")
+        self.ext = decoder.decodeStringForKey("e", orElse: "")
+    }
+    
+    public func encode(_ encoder: PostboxEncoder) {
+        encoder.encodeString(self.name, forKey: "n")
+        encoder.encodeString(self.ext, forKey: "e")
+    }
+    
+    public var id: MediaResourceId {
+        return LocalBundleResourceId(name: self.name, ext: self.ext)
+    }
+    
+    public func isEqual(to: MediaResource) -> Bool {
+        if let to = to as? LocalBundleResource {
+            return self.name == to.name && self.ext == to.ext
         } else {
             return false
         }

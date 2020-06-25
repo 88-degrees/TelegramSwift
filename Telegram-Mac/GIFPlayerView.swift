@@ -9,7 +9,7 @@
 import Cocoa
 import TGUIKit
 import AVFoundation
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 
 final class CIStickerContext : CIContext {
@@ -72,9 +72,16 @@ struct AVGifData : Equatable {
     
 }
 
+private final class TAVSampleBufferDisplayLayer : AVSampleBufferDisplayLayer {
+    deinit {
+        var bp:Int = 0
+        bp += 1
+    }
+}
+
 class GIFPlayerView: TransformImageView {
     
-    private let sampleLayer:AVSampleBufferDisplayLayer = AVSampleBufferDisplayLayer()
+    private let sampleLayer:TAVSampleBufferDisplayLayer = TAVSampleBufferDisplayLayer()
     
     private var _reader:Atomic<AVAssetReader?> = Atomic(value:nil)
 
@@ -119,16 +126,16 @@ class GIFPlayerView: TransformImageView {
                 
                 
                 if positionFlags.contains(.top) && positionFlags.contains(.left) {
-                    topLeftRadius = topLeftRadius * 3 + 2
+                    bottomLeftRadius = .cornerRadius * 3 + 2
                 }
                 if positionFlags.contains(.top) && positionFlags.contains(.right) {
-                    topRightRadius = topRightRadius * 3 + 2
+                    bottomRightRadius = .cornerRadius * 3 + 2
                 }
                 if positionFlags.contains(.bottom) && positionFlags.contains(.left) {
-                    bottomLeftRadius = bottomLeftRadius * 3 + 2
+                    topLeftRadius = .cornerRadius * 3 + 2
                 }
                 if positionFlags.contains(.bottom) && positionFlags.contains(.right) {
-                    bottomRightRadius = bottomRightRadius * 3 + 2
+                    topRightRadius = .cornerRadius * 3 + 2
                 }
                 
                 path.addArc(tangent1End: NSMakePoint(minx, miny), tangent2End: NSMakePoint(midx, miny), radius: bottomLeftRadius)
@@ -217,11 +224,6 @@ class GIFPlayerView: TransformImageView {
                 return
             }
             
-            let context: CIStickerContext
-            context = CIStickerContext(options: [CIContextOption.useSoftwareRenderer : NSNumber(value: true)])
-
-            let isAnimatedSticker = data?.animatedSticker ?? false
-            
             layer.requestMediaDataWhenReady(on: sampleBufferQueue, using: {
                 if stopRequesting.swap(false) {
                     
@@ -256,46 +258,6 @@ class GIFPlayerView: TransformImageView {
                             
                             if readerValue.status == .reading, let sampleBuffer = outputValue.copyNextSampleBuffer() {
                                 var sampleBuffer = sampleBuffer
-                                if isAnimatedSticker {
-                                    let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
-                                    var newSampleBuffer:CMSampleBuffer? = nil
-                                    if let imageBuffer = imageBuffer {
-                                        let sourceImage = CIImage(cvImageBuffer: imageBuffer)
-                                        
-                                        var cvPixelBuffer: CVPixelBuffer?
-                                        let videoSize = CGSize(width: 400, height: 400)
-                                        CVPixelBufferCreate(nil, 400, 400, kCVPixelFormatType_32BGRA, nil, &cvPixelBuffer)
-                                        if let cvPixelBuffer = cvPixelBuffer {
-                                            
-                                            let sourceRect = CGRect(origin: .zero, size: videoSize)
-                                            let alphaRect = sourceRect.offsetBy(dx: 0, dy: sourceRect.height)
-                                            let filter = AlphaFrameFilter()
-                                            filter.inputImage = sourceImage.cropped(to: alphaRect)
-                                                .transformed(by: CGAffineTransform(translationX: 0, y: -sourceRect.height))
-                                            filter.maskImage = sourceImage.cropped(to: sourceRect)
-                                            
-                                            let outputImage = filter.outputImage!
-                                            
-                                            
-                                            
-                                           context.render(outputImage, to: cvPixelBuffer)
-                                            
-                                            var formatRef: CMVideoFormatDescription?
-                                            let _ = CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: cvPixelBuffer, formatDescriptionOut: &formatRef)
-                                            
-                                            
-                                            var sampleTimingInfo: CMSampleTimingInfo = CMSampleTimingInfo()
-                                            CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &sampleTimingInfo)
-                                            
-                                            CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: cvPixelBuffer, formatDescription: formatRef!, sampleTiming: &sampleTimingInfo, sampleBufferOut: &newSampleBuffer)
-                                            
-                                            if let newSampleBuffer = newSampleBuffer {
-                                                sampleBuffer = newSampleBuffer
-                                            }
-                                        }
-                                    }
-                                }
-                                
                                 layer.enqueue(sampleBuffer)
                                 
                                 continue
@@ -424,3 +386,46 @@ fileprivate func restartReading(_reader:Atomic<AVAssetReader?>, _asset:Atomic<AV
     
 }
 
+
+
+/*
+ if isAnimatedSticker {
+ let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
+ var newSampleBuffer:CMSampleBuffer? = nil
+ if let imageBuffer = imageBuffer {
+ let sourceImage = CIImage(cvImageBuffer: imageBuffer)
+ 
+ var cvPixelBuffer: CVPixelBuffer?
+ let videoSize = CGSize(width: 400, height: 400)
+ CVPixelBufferCreate(nil, 400, 400, kCVPixelFormatType_32BGRA, nil, &cvPixelBuffer)
+ if let cvPixelBuffer = cvPixelBuffer {
+ 
+ let sourceRect = CGRect(origin: .zero, size: videoSize)
+ let alphaRect = sourceRect.offsetBy(dx: 0, dy: sourceRect.height)
+ let filter = AlphaFrameFilter()
+ filter.inputImage = sourceImage.cropped(to: alphaRect)
+ .transformed(by: CGAffineTransform(translationX: 0, y: -sourceRect.height))
+ filter.maskImage = sourceImage.cropped(to: sourceRect)
+ 
+ let outputImage = filter.outputImage!
+ 
+ 
+ 
+ context.render(outputImage, to: cvPixelBuffer)
+ 
+ var formatRef: CMVideoFormatDescription?
+ let _ = CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: cvPixelBuffer, formatDescriptionOut: &formatRef)
+ 
+ 
+ var sampleTimingInfo: CMSampleTimingInfo = CMSampleTimingInfo()
+ CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &sampleTimingInfo)
+ 
+ CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: cvPixelBuffer, formatDescription: formatRef!, sampleTiming: &sampleTimingInfo, sampleBufferOut: &newSampleBuffer)
+ 
+ if let newSampleBuffer = newSampleBuffer {
+ sampleBuffer = newSampleBuffer
+ }
+ }
+ }
+ }
+ */

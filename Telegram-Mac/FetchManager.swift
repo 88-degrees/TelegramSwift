@@ -1,7 +1,8 @@
 import Foundation
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 private struct FetchManagerLocationEntryId: Hashable {
     let location: FetchManagerLocation
@@ -162,7 +163,7 @@ private final class FetchManagerCategoryContext {
                     } else {
                         range = nil
                     }
-                    activeContext.disposable = fetchedMediaResource(postbox: postbox, reference: entry.reference, range: range, statsCategory: entry.fetchTag, reportResultStatus: true).start(next: { value in
+                    activeContext.disposable = fetchedMediaResource(mediaBox: postbox.mediaBox, reference: entry.reference, range: range, statsCategory: entry.fetchTag, reportResultStatus: true).start(next: { value in
                         entryCompleted(id, value)
                     })
                 } else {
@@ -215,7 +216,7 @@ private final class FetchManagerCategoryContext {
                     } else {
                         range = nil
                     }
-                    activeContext.disposable = fetchedMediaResource(postbox: postbox, reference: entry.reference, range: range, statsCategory: entry.fetchTag, reportResultStatus: true).start(next: { value in
+                    activeContext.disposable = fetchedMediaResource(mediaBox: postbox.mediaBox, reference: entry.reference, range: range, statsCategory: entry.fetchTag, reportResultStatus: true).start(next: { value in
                         entryCompleted(id, value)
                     })
                 }
@@ -331,7 +332,7 @@ final class FetchManager {
                             switch id.locationKey {
                             case let .messageId(messageId):
                                 _ = (strongSelf.postbox.messageAtId(messageId) |> map { $0?.media.first as? TelegramMediaFile} |> filter {$0 != nil} |> map {$0!} |> mapToSignal { file -> Signal<Void, NoError> in
-                                    if !file.isMusic && !file.isAnimated && !file.isVideo && !file.isVoice && !file.isInstantVideo {
+                                    if !file.isMusic && !file.isAnimated && !file.isVideo && !file.isVoice && !file.isInstantVideo && !file.isAnimatedSticker && !file.isStaticSticker {
                                         return copyToDownloads(file, postbox: postbox) |> map { _ in }
                                     }
                                     return .single(Void())

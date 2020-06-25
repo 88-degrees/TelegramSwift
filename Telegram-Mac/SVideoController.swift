@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 import IOKit.pwr_mgt
 
 extension MediaPlayerStatus {
@@ -46,10 +47,18 @@ class SVideoController: GenericViewController<SVideoView>, PictureInPictureContr
     private var pictureInPicture: Bool = false
     private var hideControls: ValuePromise<Bool> = ValuePromise(false, ignoreRepeated: true)
     var togglePictureInPictureImpl:((Bool, PictureInPictureControl)->Void)?
+    private let videoFramePreview: MediaPlayerFramePreview
+    
+    
+    private var scrubbingFrame = Promise<MediaPlayerFramePreviewResult?>(nil)
+    private var scrubbingFrames = false
+    private var scrubbingFrameDisposable: Disposable?
+
     
     init(postbox: Postbox, reference: FileMediaReference, fetchAutomatically: Bool = false) {
         self.reference = reference
         self.postbox = postbox
+        self.videoFramePreview = MediaPlayerFramePreview(postbox: postbox, fileReference: reference)
         mediaPlayer = MediaPlayer(postbox: postbox, reference: reference.resourceReference(reference.media.resource), streamable: reference.media.isStreamable, video: true, preferSoftwareDecoding: false, enableSound: true, volume: FastSettings.volumeRate, fetchAutomatically: fetchAutomatically)
         super.init()
         bar = .init(height: 0)
@@ -106,10 +115,15 @@ class SVideoController: GenericViewController<SVideoView>, PictureInPictureContr
         }))
     }
     
-    private func updateControlVisibility() {
+    private func updateControlVisibility(_ isMouseUpOrDown: Bool = false) {
         updateIdleTimer()
         if let rootView = genericView.superview?.superview {
-            hideControls.set(!genericView._mouseInside() && !rootView.isHidden)
+            var hide = !genericView._mouseInside() && !rootView.isHidden && (NSEvent.pressedMouseButtons & (1 << 0)) == 0
+            if self.fullScreenWindow != nil && isMouseUpOrDown, !genericView.insideControls {
+                hide = true
+                NSCursor.hide()
+            }
+            hideControls.set(hide)
         } else {
             hideControls.set(false)
         }
@@ -123,14 +137,22 @@ class SVideoController: GenericViewController<SVideoView>, PictureInPictureContr
         hideControls.set(false)
         
         window.set(mouseHandler: { [weak self] (event) -> KeyHandlerResult in
-            self?.updateControlVisibility()
-            
+            if let window = self?.genericView.window, let contentView = window.contentView {
+                let point = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                if contentView.hitTest(point) != nil {
+                    self?.updateControlVisibility()
+                }
+            }
             return .rejected
         }, with: self, for: .mouseMoved, priority: .modal)
         
         window.set(mouseHandler: { [weak self] (event) -> KeyHandlerResult in
-            self?.updateControlVisibility()
-            
+            if let window = self?.genericView.window, let contentView = window.contentView {
+                let point = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                if contentView.hitTest(point) != nil {
+                    self?.updateControlVisibility()
+                }
+            }
             return .rejected
         }, with: self, for: .mouseExited, priority: .modal)
         
@@ -141,21 +163,33 @@ class SVideoController: GenericViewController<SVideoView>, PictureInPictureContr
         }, with: self, for: .leftMouseDragged, priority: .modal)
         
         window.set(mouseHandler: { [weak self] (event) -> KeyHandlerResult in
-            self?.updateControlVisibility()
-            
+            if let window = self?.genericView.window, let contentView = window.contentView {
+                let point = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                if contentView.hitTest(point) != nil {
+                    self?.updateControlVisibility()
+                }
+            }
             return .rejected
         }, with: self, for: .mouseEntered, priority: .modal)
         
         window.set(mouseHandler: { [weak self] (event) -> KeyHandlerResult in
-            self?.updateControlVisibility()
-            
+            if let window = self?.genericView.window, let contentView = window.contentView {
+                let point = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                if contentView.hitTest(point) != nil {
+                    self?.updateControlVisibility()
+                }
+            }
             return .rejected
         }, with: self, for: .leftMouseDown, priority: .modal)
         
         window.set(mouseHandler: { [weak self] (event) -> KeyHandlerResult in
             guard let `self` = self else {return .rejected}
-            
-            self.updateControlVisibility()
+            if let window = self.genericView.window, let contentView = window.contentView {
+                let point = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                if contentView.hitTest(point) != nil {
+                    self.updateControlVisibility()
+                }
+            }
             self.genericView.subviews.last?.mouseUp(with: event)
             return .rejected
         }, with: self, for: .leftMouseUp, priority: .modal)
@@ -254,11 +288,42 @@ class SVideoController: GenericViewController<SVideoView>, PictureInPictureContr
             self?.genericView.bufferingStatus = bufferingStatus
         }))
         
+        self.scrubbingFrameDisposable = (self.scrubbingFrame.get()
+            |> deliverOnMainQueue).start(next: { [weak self] result in
+                guard let `self` = self else {
+                    return
+                }
+                if let result = result {
+                    self.genericView.showScrubblerPreviewIfNeeded()
+                    self.genericView.setCurrentScrubblingState(result)
+                } else {
+                    self.genericView.hideScrubblerPreviewIfNeeded()
+                    // empty image
+                }
+            })
+
         
         genericView.interactions = SVideoInteractions(playOrPause: { [weak self] in
             self?.playOrPause()
         }, rewind: { [weak self] timestamp in
-            self?.mediaPlayer.seek(timestamp: timestamp)
+            guard let `self` = self else { return }
+            self.mediaPlayer.seek(timestamp: timestamp)
+            
+        }, scrobbling: { [weak self] timecode in
+            guard let `self` = self else { return }
+
+            if let timecode = timecode {
+                if !self.scrubbingFrames {
+                    self.scrubbingFrames = true
+                    self.scrubbingFrame.set(self.videoFramePreview.generatedFrames
+                        |> map(Optional.init))
+                }
+                self.videoFramePreview.generateFrame(at: timecode)
+            } else {
+                self.scrubbingFrame.set(.single(nil))
+                self.videoFramePreview.cancelPendingFrames()
+                self.scrubbingFrames = false
+            }
         }, volume: { [weak self] value in
             self?.mediaPlayer.setVolume(value)
             FastSettings.setVolumeRate(value)
@@ -313,13 +378,17 @@ class SVideoController: GenericViewController<SVideoView>, PictureInPictureContr
         genericView.rewindForward()
     }
     
+    var isFullscreen: Bool {
+        return self.fullScreenRestoreState != nil
+    }
+    
     func toggleFullScreen() {
         if let screen = NSScreen.main {
             if let window = fullScreenWindow, let state = fullScreenRestoreState {
                 
                 
                 
-                window.setFrame(NSMakeRect(state.rect.minX, screen.frame.height - state.rect.maxY, state.rect.width, state.rect.height), display: true, animate: true)
+                window.setFrame(NSMakeRect(screen.frame.minX + state.rect.minX, screen.frame.minY + screen.frame.height - state.rect.maxY, state.rect.width, state.rect.height), display: true, animate: true)
                 window.orderOut(nil)
                 view.frame = state.rect
                 state.view.addSubview(view)

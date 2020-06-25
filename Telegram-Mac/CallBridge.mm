@@ -136,6 +136,9 @@ static void controllerStateCallback(tgvoip::VoIPController *controller, int stat
 +(int32_t)voipMaxLayer {
     return tgvoip::VoIPController::GetConnectionMaxLayer();
 }
++(NSString *)voipVersion {
+    return [NSString stringWithUTF8String:tgvoip::VoIPController::GetVersion()];
+}
 
 +(NSArray<AudioDevice *> *)inputDevices {
     
@@ -216,9 +219,16 @@ static void controllerStateCallback(tgvoip::VoIPController *controller, int stat
         
         endpoint.id = desc.identifier;
         endpoint.port = (uint32_t)desc.port;
-        endpoint.address = tgvoip::NetworkAddress::IPv4(desc.ipv4.UTF8String);
-        endpoint.v6address = tgvoip::NetworkAddress::IPv4(desc.ipv6.UTF8String);
+        
+        tgvoip::IPv4Address address(std::string(desc.ipv4.UTF8String));
+        tgvoip::IPv6Address addressv6(std::string(desc.ipv6.UTF8String));
+
+        
+//        endpoint.address = tgvoip::NetworkAddress::IPv4(desc.ipv4.UTF8String);
+//        endpoint.v6address = tgvoip::NetworkAddress::IPv4(desc.ipv6.UTF8String);
         endpoint.type = tgvoip::Endpoint::Type::UDP_RELAY;
+        endpoint.address = address;
+        endpoint.v6address = addressv6;
         [desc.peerTag getBytes:&endpoint.peerTag length:16];
         
         it = endpoints.insert ( it , endpoint );

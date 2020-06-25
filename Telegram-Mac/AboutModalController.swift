@@ -17,6 +17,8 @@ var APP_VERSION_STRING: String {
     vText += " Stable"
     #elseif APP_STORE
     vText += " AppStore"
+    #elseif ALPHA
+    vText += " Alpha"
     #else
     vText += " Beta"
     #endif
@@ -46,7 +48,7 @@ fileprivate class AboutModalView : Control {
         
         _ = attr.append(string: " (", color: theme.colors.grayText, font: .medium(.text))
 
-        let range = attr.append(string: L10n.x3vGGIWUTitle.lowercased(), color: theme.colors.blueUI, font: .medium(.text))
+        let range = attr.append(string: L10n.x3vGGIWUTitle.lowercased(), color: theme.colors.accent, font: .medium(.text))
         attr.addAttribute(.link, value: "copy", range: range)
         _ = attr.append(string: ")", color: theme.colors.grayText, font: .medium(.text))
 
@@ -107,8 +109,8 @@ class AboutModalController: ModalViewController {
         bar = .init(height: 0)
     }
     
-    override func close() {
-        super.close()
+    override func close(animationType: ModalAnimationCloseBehaviour = .common) {
+        super.close(animationType: animationType)
     }
     
     

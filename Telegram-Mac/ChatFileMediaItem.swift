@@ -7,8 +7,9 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 import TGUIKit
 
 class ChatFileLayoutParameters : ChatMediaLayoutParameters {
@@ -27,8 +28,8 @@ class ChatFileLayoutParameters : ChatMediaLayoutParameters {
         let file = media as! TelegramMediaFile
         
         
-        self.uploadingLayout = TextViewLayout(.initialize(string: L10n.messagesFileStateFetchingOut1(100), font: .normal(.text)))
-        self.downloadingLayout = TextViewLayout(.initialize(string: L10n.messagesFileStateFetchingIn1(100), font: .normal(.text)))
+        self.uploadingLayout = TextViewLayout(.initialize(string: L10n.messagesFileStateFetchingOut1(100), font: .normal(.text)), alwaysStaticItems: true)
+        self.downloadingLayout = TextViewLayout(.initialize(string: L10n.messagesFileStateFetchingIn1(100), font: .normal(.text)), alwaysStaticItems: true)
         
         
         var attr:NSMutableAttributedString = NSMutableAttributedString()
@@ -39,7 +40,7 @@ class ChatFileLayoutParameters : ChatMediaLayoutParameters {
             let range = attr.append(string: tr(L10n.messagesFileStateLocal), color: theme.bubbled && !isIncoming ? presentation.grayText : presentation.link, font: .medium(FontSize.text))
             attr.addAttribute(NSAttributedString.Key.link, value: "chat://file/finder", range: range)
         }
-        finderLayout = TextViewLayout(attr, maximumNumberOfLines: 1)
+        finderLayout = TextViewLayout(attr, maximumNumberOfLines: 1, alwaysStaticItems: true)
 
         
         attr = NSMutableAttributedString()
@@ -49,7 +50,7 @@ class ChatFileLayoutParameters : ChatMediaLayoutParameters {
             let range = attr.append(string: tr(L10n.messagesFileStateRemote), color:  theme.bubbled && !isIncoming ? presentation.grayText : presentation.link, font: .medium(.text))
             attr.addAttribute(NSAttributedString.Key.link, value: "chat://file/download", range: range)
         }
-        downloadLayout = TextViewLayout(attr, maximumNumberOfLines: 1)
+        downloadLayout = TextViewLayout(attr, maximumNumberOfLines: 1, alwaysStaticItems: true)
         
 
         super.init(presentation: presentation, media: media, automaticDownload: automaticDownload, autoplayMedia: autoplayMedia)
@@ -72,8 +73,8 @@ class ChatFileMediaItem: ChatMediaItem {
 
     
     
-    override init(_ initialSize:NSSize, _ chatInteraction:ChatInteraction, _ context: AccountContext, _ object: ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings) {
-        super.init(initialSize, chatInteraction, context, object, downloadSettings)
+    override init(_ initialSize:NSSize, _ chatInteraction:ChatInteraction, _ context: AccountContext, _ object: ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings, theme: TelegramPresentationTheme) {
+        super.init(initialSize, chatInteraction, context, object, downloadSettings, theme: theme)
         self.parameters = ChatMediaLayoutParameters.layout(for: (self.media as! TelegramMediaFile), isWebpage: false, chatInteraction: chatInteraction, presentation: .make(for: object.message!, account: context.account, renderType: object.renderType), automaticDownload: downloadSettings.isDownloable(object.message!), isIncoming: object.message!.isIncoming(context.account, object.renderType == .bubble), isFile: true, autoplayMedia: object.autoplayMedia)
     }
     

@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 private enum ChatRecordingOverlayState {
     case voice
@@ -27,12 +28,13 @@ private final class LockControl : View {
         addSubview(head)
         addSubview(arrow)
         addSubview(body)
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
     }
     
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         backgroundColor = theme.colors.background
         head.image = theme.icons.chatOverlayLockerHeadRecording
         head.sizeToFit()
@@ -40,7 +42,7 @@ private final class LockControl : View {
         body.sizeToFit()
         arrow.image = theme.icons.chatOverlayLockArrowRecording
         arrow.sizeToFit()
-        layer?.borderColor = theme.colors.blueUI.cgColor
+        layer?.borderColor = theme.colors.accent.cgColor
         layer?.borderWidth = .borderSize
     }
     
@@ -49,7 +51,7 @@ private final class LockControl : View {
     override func layout() {
         super.layout()
         arrow.centerX(y: frame.height - arrow.frame.height - 8)
-        body.centerX(y: floorToScreenPixels(scaleFactor: backingScaleFactor, (30 - body.frame.height)/2) + 3)
+        body.centerX(y: floorToScreenPixels(backingScaleFactor, (30 - body.frame.height)/2) + 3)
         head.centerX(y: 4)
     }
     
@@ -73,20 +75,21 @@ private class ChatRecorderOverlayView : Control {
     private let outerContainer: Control = Control()
     private let stateView: ImageView = ImageView()
     private var currentLevel: Double = 1.0
+    private var previousTime: Date = Date()
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         layer?.cornerRadius = frameRect.width / 2
         backgroundColor = .clear
        
-        outerContainer.setFrameSize(NSMakeSize(frameRect.width - 20, frameRect.height - 20))
-        outerContainer.backgroundColor = theme.colors.blueUI.withAlphaComponent(0.5)
+        outerContainer.setFrameSize(NSMakeSize(frameRect.width - 30, frameRect.height - 30))
+        outerContainer.backgroundColor = theme.colors.accent.withAlphaComponent(0.5)
         outerContainer.layer?.cornerRadius = outerContainer.frame.width / 2
         addSubview(outerContainer)
         outerContainer.center()
       //  self.outerContainer.animates = true
         
-        innerContainer.setFrameSize(NSMakeSize(frameRect.width - 20, frameRect.height - 20))
-        innerContainer.backgroundColor = theme.colors.blueUI
+        innerContainer.setFrameSize(NSMakeSize(frameRect.width - 30, frameRect.height - 30))
+        innerContainer.backgroundColor = theme.colors.accent
         innerContainer.layer?.cornerRadius = innerContainer.frame.width / 2
         addSubview(innerContainer)
         innerContainer.center()
@@ -109,15 +112,19 @@ private class ChatRecorderOverlayView : Control {
     }
     
     func updatePeakLevel(_ peakLevel: Float) {
-        let power = min(mappingRange(Double(peakLevel), 0, 1, 1, 1.5),1.5);
-        
-        outerContainer.layer?.animateScaleCenter(from: CGFloat(currentLevel), to: CGFloat(power), duration: 0.1, removeOnCompletion:false)
-        self.currentLevel = power
+        let power = mappingRange(Double(peakLevel), 0.3, 3, 1.05, 1.5);
+        if abs(self.currentLevel - power) > 0.1 || (Date().timeIntervalSinceNow - previousTime.timeIntervalSinceNow) > 0.2  {
+            
+            let previous = outerContainer.layer?.presentation()?.value(forKeyPath: "transform.scale") as? CGFloat ?? CGFloat(currentLevel)
+            outerContainer.layer?.animateScaleCenter(from: previous, to: CGFloat(power), duration: 0.2, removeOnCompletion:false, timingFunction: .linear)
+            self.currentLevel = Double(power)
+            self.previousTime = Date()
+        }
     }
     
     func updateInside() {
-        innerContainer.backgroundColor = mouseInside() ? theme.colors.blueUI : theme.colors.redUI
-        outerContainer.backgroundColor = (mouseInside() ? theme.colors.blueUI : theme.colors.redUI).withAlphaComponent(0.5)
+        innerContainer.backgroundColor = mouseInside() ? theme.colors.accent : theme.colors.redUI
+        outerContainer.backgroundColor = (mouseInside() ? theme.colors.accent : theme.colors.redUI).withAlphaComponent(0.5)
     }
     
     required init?(coder: NSCoder) {
@@ -176,7 +183,7 @@ class ChatRecorderOverlayWindowController : NSObject {
             self.chatInteraction.update({$0.withoutRecordingState()})
         }
         if state == .fixed {
-            confirm(for: parent, information: L10n.chatRecordingCancel, successHandler: { _ in
+            confirm(for: parent, information: L10n.chatRecordingCancel, okTitle: L10n.alertDiscard, cancelTitle: L10n.alertNO, successHandler: { _ in
                 proccess()
             })
         } else {

@@ -7,11 +7,15 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import AVFoundation
 import QuickLook
+
+let diceSymbol: String = "🎲"
+
 
 class MediaSenderContainer : Equatable {
     let path:String
@@ -114,7 +118,7 @@ class Sender: NSObject {
                     if CGImageDestinationFinalize(colorDestination) {
                         let resource = LocalFileMediaResource(fileId: arc4random64())
                         account.postbox.mediaBox.storeResourceData(resource.id, data: mutableData as Data)
-                        preview.append(TelegramMediaImageRepresentation(dimensions: image.size, resource: resource))
+                        preview.append(TelegramMediaImageRepresentation(dimensions: PixelDimensions(image.size), resource: resource))
                     }
                 }
                 
@@ -122,7 +126,7 @@ class Sender: NSObject {
             }
             
            
-        } else if let thumbData = try? Data(contentsOf: URL(fileURLWithPath: path)) {
+        } else if MIMEType(path).hasPrefix("image"), let thumbData = try? Data(contentsOf: URL(fileURLWithPath: path)) {
             
             let options = NSMutableDictionary()
             options.setValue(320 as NSNumber, forKey: kCGImageDestinationImageMaxPixelSize as String)
@@ -146,7 +150,7 @@ class Sender: NSObject {
                         if CGImageDestinationFinalize(colorDestination) {
                             let resource = LocalFileMediaResource(fileId: arc4random64())
                             account.postbox.mediaBox.storeResourceData(resource.id, data: mutableData as Data)
-                            preview.append(TelegramMediaImageRepresentation(dimensions: image.size, resource: resource))
+                            preview.append(TelegramMediaImageRepresentation(dimensions: image.size.pixel, resource: resource))
                         }
                     }
                 }
@@ -156,32 +160,41 @@ class Sender: NSObject {
         return preview
     }
 
-    public static func enqueue( input:ChatTextInputState, context: AccountContext, peerId:PeerId, replyId:MessageId?, disablePreview:Bool = false) ->Signal<[MessageId?],NoError> {
+    public static func enqueue( input:ChatTextInputState, context: AccountContext, peerId:PeerId, replyId:MessageId?, disablePreview:Bool = false, silent: Bool = false, atDate:Date? = nil) ->Signal<[MessageId?],NoError> {
         
         var inset:Int = 0
         
         var input:ChatTextInputState = input
         
-        let emojis = input.inputText.fixed.emojiString.emojis.compactMap {!$0.isEmpty ? $0 : nil}
+        let emojis = Array(input.inputText.fixed.emojiString).map { String($0) }.compactMap {!$0.isEmpty ? $0 : nil}
         if input.attributes.isEmpty {
             input = ChatTextInputState(inputText: input.inputText.trimmed)
         }
+        
+        
+        var mediaReference: AnyMediaReference? = nil
+        if input.inputText == diceSymbol, peerId.namespace != Namespaces.Peer.SecretChat {
+            mediaReference = AnyMediaReference.standalone(media: TelegramMediaDice(value: nil))
+            input = ChatTextInputState(inputText: "")
+        }
+        
+        
         let mapped = cut_long_message( input.inputText, 4096).map { message -> EnqueueMessage in
             let subState = input.subInputState(from: NSMakeRange(inset, message.length))
             inset += message.length
             
 
             var attributes:[MessageAttribute] = [TextEntitiesMessageAttribute(entities: subState.messageTextEntities)]
-
+            if let date = atDate {
+                attributes.append(OutgoingScheduleInfoMessageAttribute(scheduleTime: Int32(date.timeIntervalSince1970)))
+            }
             if disablePreview {
                 attributes.append(OutgoingContentInfoMessageAttribute(flags: [.disableLinkPreviews]))
             }
-            if FastSettings.isChannelMessagesMuted(peerId) {
+            if FastSettings.isChannelMessagesMuted(peerId) || silent {
                 attributes.append(NotificationInfoMessageAttribute(flags: [.muted]))
             }
-            
-            
-            return EnqueueMessage.message(text: subState.inputText, attributes: attributes, mediaReference: nil, replyToMessageId: replyId, localGroupingKey: nil)
+            return EnqueueMessage.message(text: subState.inputText, attributes: attributes, mediaReference: mediaReference, replyToMessageId: replyId, localGroupingKey: nil)
         }
         
         return enqueueMessages(context: context, peerId: peerId, messages: mapped) |> mapToSignal { value in
@@ -248,7 +261,7 @@ class Sender: NSObject {
                     }
                     
                     
-                    attrs.append(TelegramMediaFileAttribute.Video(duration: Int(container.duration), size: container.size, flags: [.instantRoundVideo]))
+                    attrs.append(TelegramMediaFileAttribute.Video(duration: Int(container.duration), size: PixelDimensions(container.size), flags: [.instantRoundVideo]))
                     media = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: randomId), partialReference: nil, resource: resource, previewRepresentations: previewForFile(path, account: account), immediateThumbnailData: nil, mimeType: mimeType, size: nil, attributes: attrs)
 
                 } else if mimeType.hasPrefix("image/") && !mimeType.hasSuffix("gif"), let imageData = try? Data(contentsOf: URL(fileURLWithPath: path)) {
@@ -281,7 +294,7 @@ class Sender: NSObject {
                                 let scaledSize = size.fitted(CGSize(width: 1280.0, height: 1280.0))
                                 let resource = LocalFileReferenceMediaResource(localFilePath:path,randomId:randomId, isUniquelyReferencedTemporaryFile: true)
                                 
-                                media = TelegramMediaImage(imageId: MediaId(namespace: Namespaces.Media.LocalImage, id: randomId), representations: [TelegramMediaImageRepresentation(dimensions: scaledSize, resource: resource)], immediateThumbnailData: nil, reference: nil, partialReference: nil)
+                                media = TelegramMediaImage(imageId: MediaId(namespace: Namespaces.Media.LocalImage, id: randomId), representations: [TelegramMediaImageRepresentation(dimensions: PixelDimensions(scaledSize), resource: resource)], immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
                             }
                             
                         } else {
@@ -344,7 +357,7 @@ class Sender: NSObject {
             let video = asset.tracks(withMediaType: AVMediaType.video).first
             let audio = asset.tracks(withMediaType: AVMediaType.audio).first
             if let video = video {
-                attrs.append(TelegramMediaFileAttribute.Video(duration: Int(CMTimeGetSeconds(asset.duration)), size: video.naturalSize, flags: []))
+                attrs.append(TelegramMediaFileAttribute.Video(duration: Int(CMTimeGetSeconds(asset.duration)), size: PixelDimensions(video.naturalSize), flags: []))
                 attrs.append(TelegramMediaFileAttribute.FileName(fileName: path.nsstring.lastPathComponent.nsstring.deletingPathExtension.appending(".mp4")))
                 if audio == nil, let size = fileSize(path), size < Int32(10 * 1024 * 1024) {
                     attrs.append(TelegramMediaFileAttribute.Animated)
@@ -354,12 +367,12 @@ class Sender: NSObject {
         }
         
         if mime.hasSuffix("gif"), isMedia {
-            attrs.append(TelegramMediaFileAttribute.Video(duration: 0, size:TGGifConverter.gifDimensionSize(path), flags: []))
+            attrs.append(TelegramMediaFileAttribute.Video(duration: 0, size:TGGifConverter.gifDimensionSize(path).pixel, flags: []))
             attrs.append(TelegramMediaFileAttribute.Animated)
             attrs.append(TelegramMediaFileAttribute.FileName(fileName: path.nsstring.lastPathComponent.nsstring.deletingPathExtension.appending(".mp4")))
 
         } else if mime.hasPrefix("image"), let image = NSImage(contentsOf: URL(fileURLWithPath: path)) {
-            attrs.append(TelegramMediaFileAttribute.ImageSize(size: image.size))
+            attrs.append(TelegramMediaFileAttribute.ImageSize(size: image.size.pixel))
             attrs.append(TelegramMediaFileAttribute.FileName(fileName: path.nsstring.lastPathComponent))
         } else {
             let getname:(String)->String = { path in
@@ -377,15 +390,23 @@ class Sender: NSObject {
         return attrs
     }
     
-    public static func forwardMessages(messageIds:[MessageId], context: AccountContext, peerId:PeerId) -> Signal<[MessageId?], NoError> {
+    public static func forwardMessages(messageIds:[MessageId], context: AccountContext, peerId:PeerId, silent: Bool = false, atDate: Date? = nil) -> Signal<[MessageId?], NoError> {
         
         var fwdMessages:[EnqueueMessage] = []
         
         let sorted = messageIds.sorted(by: >)
         
+        var attributes: [MessageAttribute] = []        
+        if FastSettings.isChannelMessagesMuted(peerId) || silent {
+            attributes.append(NotificationInfoMessageAttribute(flags: [.muted]))
+        }
+        
+        if let date = atDate {
+            attributes.append(OutgoingScheduleInfoMessageAttribute(scheduleTime: Int32(date.timeIntervalSince1970)))
+        }
         
         for msgId in sorted {
-            fwdMessages.append(EnqueueMessage.forward(source: msgId, grouping: messageIds.count > 1 ? .auto : .none))
+            fwdMessages.append(EnqueueMessage.forward(source: msgId, grouping: messageIds.count > 1 ? .auto : .none, attributes: attributes))
         }
         return enqueueMessages(context: context, peerId: peerId, messages: fwdMessages.reversed())
     }
@@ -400,13 +421,16 @@ class Sender: NSObject {
         return enqueueMessages(context: context, peerId: peerId, messages: [EnqueueMessage.message(text: "", attributes: attributes, mediaReference: AnyMediaReference.standalone(media: TelegramMediaContact(firstName: contact.firstName ?? "", lastName: contact.lastName ?? "", phoneNumber: contact.phone ?? "", peerId: contact.id, vCardData: nil)), replyToMessageId: nil, localGroupingKey: nil)])
     }
     
-    public static func enqueue(media:[MediaSenderContainer], context: AccountContext, peerId:PeerId, chatInteraction:ChatInteraction) ->Signal<[MessageId?], NoError> {
+    public static func enqueue(media:[MediaSenderContainer], context: AccountContext, peerId:PeerId, chatInteraction:ChatInteraction, silent: Bool = false, atDate:Date? = nil) ->Signal<[MessageId?], NoError> {
         var senders:[Signal<[MessageId?], NoError>] = []
         
         
         var attributes:[MessageAttribute] = []
-        if FastSettings.isChannelMessagesMuted(peerId) {
+        if FastSettings.isChannelMessagesMuted(peerId) || silent {
             attributes.append(NotificationInfoMessageAttribute(flags: [.muted]))
+        }
+        if let date = atDate {
+            attributes.append(OutgoingScheduleInfoMessageAttribute(scheduleTime: Int32(date.timeIntervalSince1970)))
         }
         
         for path in media {
@@ -428,16 +452,19 @@ class Sender: NSObject {
         }
     }
     
-    public static func enqueue(media:Media, context: AccountContext, peerId:PeerId, chatInteraction:ChatInteraction) ->Signal<[MessageId?],NoError> {
-        return enqueue(media: [media], caption: ChatTextInputState(), context: context, peerId: peerId, chatInteraction: chatInteraction)
+    public static func enqueue(media:Media, context: AccountContext, peerId:PeerId, chatInteraction:ChatInteraction, silent: Bool = false, atDate: Date? = nil) ->Signal<[MessageId?],NoError> {
+        return enqueue(media: [media], caption: ChatTextInputState(), context: context, peerId: peerId, chatInteraction: chatInteraction, silent: silent, atDate: atDate)
     }
     
-    public static func enqueue(media:[Media], caption: ChatTextInputState, context: AccountContext, peerId:PeerId, chatInteraction:ChatInteraction, isCollage: Bool = false, additionText: ChatTextInputState? = nil) ->Signal<[MessageId?],NoError> {
+    public static func enqueue(media:[Media], caption: ChatTextInputState, context: AccountContext, peerId:PeerId, chatInteraction:ChatInteraction, isCollage: Bool = false, additionText: ChatTextInputState? = nil, silent: Bool = false, atDate: Date? = nil) ->Signal<[MessageId?],NoError> {
                 
         var attributes:[MessageAttribute] = [TextEntitiesMessageAttribute(entities: caption.messageTextEntities)]
         let caption = Atomic(value: caption)
-        if FastSettings.isChannelMessagesMuted(peerId) {
+        if FastSettings.isChannelMessagesMuted(peerId) || silent {
             attributes.append(NotificationInfoMessageAttribute(flags: [.muted]))
+        }
+        if let date = atDate {
+            attributes.append(OutgoingScheduleInfoMessageAttribute(scheduleTime: Int32(date.timeIntervalSince1970)))
         }
         
         let replyId = chatInteraction.presentation.interfaceState.replyMessageId
@@ -458,9 +485,13 @@ class Sender: NSObject {
                 
                 var attributes:[MessageAttribute] = [TextEntitiesMessageAttribute(entities: subState.messageTextEntities)]
                 
-                if FastSettings.isChannelMessagesMuted(peerId) {
+                if FastSettings.isChannelMessagesMuted(peerId) || silent {
                     attributes.append(NotificationInfoMessageAttribute(flags: [.muted]))
                 }
+                if let date = atDate {
+                    attributes.append(OutgoingScheduleInfoMessageAttribute(scheduleTime: Int32(date.timeIntervalSince1970)))
+                }
+                
                 return EnqueueMessage.message(text: subState.inputText, attributes: attributes, mediaReference: nil, replyToMessageId: replyId, localGroupingKey: nil)
             }
             messages.insert(contentsOf: mapped, at: 0)

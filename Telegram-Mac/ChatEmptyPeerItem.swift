@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 class ChatEmptyPeerItem: TableRowItem {
 
@@ -43,43 +44,61 @@ class ChatEmptyPeerItem: TableRowItem {
         
         let attr = NSMutableAttributedString()
         var lineSpacing: CGFloat? = 5
-        if  chatInteraction.peerId.namespace == Namespaces.Peer.SecretChat {
-            _ = attr.append(string: L10n.chatSecretChatEmptyHeader, color: theme.chatServiceItemTextColor, font: .medium(.text))
-            _ = attr.append(string: "\n")
-            _ = attr.append(string: L10n.chatSecretChat1Feature, color: theme.chatServiceItemTextColor, font: .medium(.text))
-            _ = attr.append(string: "\n")
-            _ = attr.append(string: L10n.chatSecretChat2Feature, color: theme.chatServiceItemTextColor, font: .medium(.text))
-            _ = attr.append(string: "\n")
-            _ = attr.append(string: L10n.chatSecretChat3Feature, color: theme.chatServiceItemTextColor, font: .medium(.text))
-            _ = attr.append(string: "\n")
-            _ = attr.append(string: L10n.chatSecretChat4Feature, color: theme.chatServiceItemTextColor, font: .medium(.text))
-
-        } else if let peer = chatInteraction.peer, peer.isGroup || peer.isSupergroup, peer.groupAccess.isCreator {
-            _ = attr.append(string: L10n.emptyGroupInfoTitle, color: theme.chatServiceItemTextColor, font: .medium(.text))
-            _ = attr.append(string: "\n")
-            _ = attr.append(string: L10n.emptyGroupInfoSubtitle, color: theme.chatServiceItemTextColor, font: .medium(.text))
-            _ = attr.append(string: "\n")
-            _ = attr.append(string: L10n.emptyGroupInfoLine1(chatInteraction.presentation.limitConfiguration.maxSupergroupMemberCount.formattedWithSeparator), color: theme.chatServiceItemTextColor, font: .medium(.text))
-            _ = attr.append(string: "\n")
-            _ = attr.append(string: L10n.emptyGroupInfoLine2, color: theme.chatServiceItemTextColor, font: .medium(.text))
-            _ = attr.append(string: "\n")
-            _ = attr.append(string: L10n.emptyGroupInfoLine3, color: theme.chatServiceItemTextColor, font: .medium(.text))
-            _ = attr.append(string: "\n")
-            _ = attr.append(string: L10n.emptyGroupInfoLine4, color: theme.chatServiceItemTextColor, font: .medium(.text))
-        } else {
-            if let restriction = chatInteraction.presentation.restrictionInfo {
-                let reason = restriction.reason.components(separatedBy: ":")
-                if reason.count == 2 {
-                    _ = attr.append(string: reason[1], color: theme.colors.grayText, font: .medium(.text))
-                } else {
-                    _ = attr.append(string: L10n.chatEmptyChat, color: theme.chatServiceItemTextColor, font: .medium(.text))
-                    lineSpacing = nil
-                }
+        switch chatInteraction.mode {
+        case .history:
+            if  chatInteraction.peerId.namespace == Namespaces.Peer.SecretChat {
+                _ = attr.append(string: L10n.chatSecretChatEmptyHeader, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                _ = attr.append(string: "\n")
+                _ = attr.append(string: L10n.chatSecretChat1Feature, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                _ = attr.append(string: "\n")
+                _ = attr.append(string: L10n.chatSecretChat2Feature, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                _ = attr.append(string: "\n")
+                _ = attr.append(string: L10n.chatSecretChat3Feature, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                _ = attr.append(string: "\n")
+                _ = attr.append(string: L10n.chatSecretChat4Feature, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                
+            } else if let peer = chatInteraction.peer, peer.isGroup || peer.isSupergroup, peer.groupAccess.isCreator {
+                _ = attr.append(string: L10n.emptyGroupInfoTitle, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                _ = attr.append(string: "\n")
+                _ = attr.append(string: L10n.emptyGroupInfoSubtitle, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                _ = attr.append(string: "\n")
+                _ = attr.append(string: L10n.emptyGroupInfoLine1(chatInteraction.presentation.limitConfiguration.maxSupergroupMemberCount.formattedWithSeparator), color: theme.chatServiceItemTextColor, font: .medium(.text))
+                _ = attr.append(string: "\n")
+                _ = attr.append(string: L10n.emptyGroupInfoLine2, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                _ = attr.append(string: "\n")
+                _ = attr.append(string: L10n.emptyGroupInfoLine3, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                _ = attr.append(string: "\n")
+                _ = attr.append(string: L10n.emptyGroupInfoLine4, color: theme.chatServiceItemTextColor, font: .medium(.text))
             } else {
-                lineSpacing = nil
-                _ = attr.append(string: L10n.chatEmptyChat, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                if let restriction = chatInteraction.presentation.restrictionInfo {
+                    var hasRule: Bool = false
+                    for rule in restriction.rules {
+                        #if APP_STORE
+                        if rule.platform == "ios" || rule.platform == "all" {
+                            if !chatInteraction.context.contentSettings.ignoreContentRestrictionReasons.contains(rule.reason) {
+                                _ = attr.append(string: rule.text, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                                hasRule = true
+                                break
+                            }
+                        }
+                        #endif
+                    }
+                    if !hasRule {
+                        _ = attr.append(string: L10n.chatEmptyChat, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                        lineSpacing = nil
+                    }
+                    
+                } else {
+                    lineSpacing = nil
+                    _ = attr.append(string: L10n.chatEmptyChat, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                }
             }
+        case .scheduled:
+            lineSpacing = nil
+            _ = attr.append(string: L10n.chatEmptyChat, color: theme.chatServiceItemTextColor, font: .medium(.text))
         }
+        
+        
         textViewLayout = TextViewLayout(attr, alignment: .center, lineSpacing: lineSpacing, alwaysStaticItems: true)
         textViewLayout.interactions = globalLinkExecutor
         
@@ -88,17 +107,24 @@ class ChatEmptyPeerItem: TableRowItem {
         
         if chatInteraction.peerId.namespace == Namespaces.Peer.CloudUser {
             peerViewDisposable.set((chatInteraction.context.account.postbox.peerView(id: chatInteraction.peerId) |> deliverOnMainQueue).start(next: { [weak self] peerView in
-                if let cachedData = peerView.cachedData as? CachedUserData, let user = peerView.peers[peerView.peerId], user.isBot {
-                    if let about = cachedData.botInfo?.description {
-                        let about = user.isScam ? L10n.peerInfoScamWarning : about
-                        guard let `self` = self else {return}
-                        let attr = NSMutableAttributedString()
-                        _ = attr.append(string: about, color: theme.chatServiceItemTextColor, font: .medium(.text))
-                        attr.detectLinks(type: [.Links, .Mentions, .Hashtags, .Commands], context: chatInteraction.context, color: theme.colors.link, openInfo:chatInteraction.openInfo, hashtag: chatInteraction.context.sharedContext.bindings.globalSearch, command: chatInteraction.sendPlainText, applyProxy: chatInteraction.applyProxy, dotInMention: false)
-                        self.textViewLayout = TextViewLayout(attr, alignment: .left)
-                        self.textViewLayout.interactions = globalLinkExecutor
-                        self.view?.layout()
+                if let cachedData = peerView.cachedData as? CachedUserData, let user = peerView.peers[peerView.peerId], let botInfo = cachedData.botInfo {
+                    var about = botInfo.description
+                    if about.isEmpty {
+                        about = cachedData.about ?? L10n.chatEmptyChat
                     }
+                    if about.isEmpty {
+                        about = L10n.chatEmptyChat
+                    }
+                    if user.isScam {
+                        about = L10n.peerInfoScamWarning
+                    }
+                    guard let `self` = self else {return}
+                    let attr = NSMutableAttributedString()
+                    _ = attr.append(string: about, color: theme.chatServiceItemTextColor, font: .medium(.text))
+                    attr.detectLinks(type: [.Links, .Mentions, .Hashtags, .Commands], context: chatInteraction.context, color: theme.colors.link, openInfo:chatInteraction.openInfo, hashtag: chatInteraction.context.sharedContext.bindings.globalSearch, command: chatInteraction.sendPlainText, applyProxy: chatInteraction.applyProxy, dotInMention: false)
+                    self.textViewLayout = TextViewLayout(attr, alignment: .left)
+                    self.textViewLayout.interactions = globalLinkExecutor
+                    self.view?.layout()
                 }
             }))
         }
@@ -124,6 +150,8 @@ class ChatEmptyPeerView : TableRowView {
         //containerView.addSubview(textView)
         textView.isSelectable = false
         textView.userInteractionEnabled = true
+        textView.disableBackgroundDrawing = true
+
     }
     
     override func updateColors() {
@@ -136,7 +164,7 @@ class ChatEmptyPeerView : TableRowView {
     }
     
     override var backdorColor: NSColor {
-        return theme.wallpaper != .none ? .clear : theme.colors.background
+        return theme.wallpaper.wallpaper != .none ? .clear : theme.chatBackground
     }
     
     override func set(item: TableRowItem, animated: Bool) {

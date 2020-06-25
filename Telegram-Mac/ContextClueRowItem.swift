@@ -84,7 +84,7 @@ private final class ClueRowView : HorizontalRowView {
     
     override func updateColors() {
         super.updateColors()
-        containerView.backgroundColor = item?.isSelected == true ? theme.colors.blueUI : theme.colors.background
+        containerView.backgroundColor = item?.isSelected == true ? theme.colors.accent : theme.colors.background
     }
     
     override func set(item: TableRowItem, animated: Bool) {
@@ -199,7 +199,7 @@ private class ContextClueRowView : TableRowView, TableViewDelegate {
         tableView.endTableUpdates()
         
         if let selectedItem = tableView.selectedItem() {
-            tableView.scroll(to: .center(id: selectedItem.stableId, innerId: nil, animated: animated, focus: false, inset: 0))
+            tableView.scroll(to: .center(id: selectedItem.stableId, innerId: nil, animated: animated, focus: .init(focus: false), inset: 0))
         }
         
         needsLayout = true

@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
 
 class GalleryThumbsControl: ViewController {
     private let interactions: GalleryInteractions
@@ -18,7 +19,7 @@ class GalleryThumbsControl: ViewController {
     
     init(interactions: GalleryInteractions) {
         self.interactions = interactions
-        super.init(frame: NSMakeRect(0, 0, 400, 50))
+        super.init(frame: NSMakeRect(0, 0, 400, 80))
     }
     
     private(set) var items:[MGalleryItem] = []
@@ -83,8 +84,6 @@ class GalleryThumbsControl: ViewController {
                 newItems = items
             case .secureIdDocument:
                 newItems = items
-            case .lottie:
-                newItems = items
             }
         }
 
@@ -137,7 +136,10 @@ class GalleryThumbsControl: ViewController {
         return UpdateTransition<MGalleryItem>(deleted: deleteIndices, inserted: indicesAndItems.map {($0.0, $0.1)}, updated: updateIndices.map {($0.0, $0.1)})
     }
     
-
+    deinit {
+        var bp:Int = 0
+        bp += 1
+    }
     
     var genericView:GalleryThumbsControlView {
         return view as! GalleryThumbsControlView

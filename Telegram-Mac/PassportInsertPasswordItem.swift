@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 private final class PassportInsertPasswordField : NSSecureTextField {
     
@@ -185,7 +186,7 @@ final class PassportInsertPasswordRowView : GeneralRowView, NSTextFieldDelegate 
         input.sizeToFit()
         nextButton.set(font: .normal(.title), for: .Normal)
         nextButton.set(color: .white, for: .Normal)
-        nextButton.set(background: theme.colors.blueUI, for: .Normal)
+        nextButton.set(background: theme.colors.accent, for: .Normal)
         nextButton.set(text: L10n.secureIdInsertPasswordNext, for: .Normal)
         _ = nextButton.sizeToFit(NSMakeSize(40, 0), NSMakeSize(.greatestFiniteMagnitude, 40))
         nextButton.layer?.cornerRadius = 20

@@ -18,7 +18,7 @@ class AddContactTableItem: TableRowItem {
     init(_ initialSize: NSSize, stableId: AnyHashable, addContact: @escaping()->Void) {
         _stableId = stableId
         
-        self.text = TextViewLayout(.initialize(string: tr(L10n.contactsAddContact), color: theme.colors.blueUI, font: .normal(.title)), maximumNumberOfLines: 1)
+        self.text = TextViewLayout(.initialize(string: tr(L10n.contactsAddContact), color: theme.colors.accent, font: .normal(.title)), maximumNumberOfLines: 1)
         self.addContact = addContact
         super.init(initialSize)
     }
@@ -92,7 +92,7 @@ class AddContactTableRowView : TableRowView {
     
     override func layout() {
         super.layout()
-        imageView.centerY(x: floorToScreenPixels(scaleFactor: backingScaleFactor, (56 - imageView.frame.width)/2))
+        imageView.centerY(x: floorToScreenPixels(backingScaleFactor, (56 - imageView.frame.width)/2))
         textView.layout?.measure(width: frame.width - 66)
         textView.update(textView.layout)
         textView.centerY(x: 56)

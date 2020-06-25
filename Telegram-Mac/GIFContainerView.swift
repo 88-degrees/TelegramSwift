@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import TelegramCoreMac
+import TelegramCore
+import SyncCore
 import TGUIKit
-import PostboxMac
-import SwiftSignalKitMac
+import Postbox
+import SwiftSignalKit
 class GIFContainerView: Control {
 
     let player:GIFPlayerView = GIFPlayerView()
@@ -44,11 +45,11 @@ class GIFContainerView: Control {
         super.init()
         addSubview(player)
         self.backgroundColor = .clear
-        self.layer?.borderWidth = 1.5
+        
+        //self.layer?.borderWidth = 1.5
         //self.layer?.cornerRadius = 4.0
         player.background = .clear
         player.setVideoLayerGravity(.resizeAspectFill)
-        
         set(handler: { [weak self] control in
             if let `self` = self, let window = self.window as? Window, let table = self.tableView, let context = self.context {
                 _ = startModalPreviewHandle(table, window: window, context: context)
@@ -87,7 +88,7 @@ class GIFContainerView: Control {
     
     func fetch() {
         if let context = context, let reference = reference {
-            fetchDisposable.set(fetchedMediaResource(postbox: context.account.postbox, reference: reference, statsCategory: .file).start())
+            fetchDisposable.set(fetchedMediaResource(mediaBox: context.account.postbox.mediaBox, reference: reference, statsCategory: .file).start())
         }
     }
     
@@ -147,15 +148,17 @@ class GIFContainerView: Control {
     
     
     func updateListeners() {
-        removeNotificationListeners()
         if let window = window {
             NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSWindow.didBecomeKeyNotification, object: window)
             NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSWindow.didResignKeyNotification, object: window)
             NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSView.boundsDidChangeNotification, object: tableView?.clipView)
+        } else {
+            removeNotificationListeners()
         }
     }
     deinit {
         playerDisposable.dispose()
+        removeNotificationListeners()
     }
     
     override func viewDidMoveToWindow() {
@@ -163,7 +166,7 @@ class GIFContainerView: Control {
         updatePlayerIfNeeded()
     }
     
-    func update(with reference: MediaResourceReference, size: NSSize, viewSize:NSSize, file: TelegramMediaFile?, context: AccountContext, table: TableView?, ignoreWindowKey: Bool = false, iconSignal:Signal<(TransformImageArguments)->DrawingContext?, NoError>) {
+    func update(with reference: MediaResourceReference, size: NSSize, viewSize:NSSize, file: TelegramMediaFile?, context: AccountContext, table: TableView?, ignoreWindowKey: Bool = false, iconSignal:Signal<ImageDataTransformation, NoError>) {
         let updated = self.reference == nil || !self.reference!.resource.id.isEqual(to: reference.resource.id)
         self.tableView = table
         self.context = context
@@ -173,13 +176,12 @@ class GIFContainerView: Control {
         self.ignoreWindowKey = ignoreWindowKey
         self.layer?.borderColor = theme.colors.background.cgColor
         
-        updateListeners()
         player.setFrameSize(viewSize)
         
         player.center()
         progressView?.center()
         let imageSize = viewSize.aspectFitted(NSMakeSize(size.width, size.height))
-        let arguments = TransformImageArguments(corners: ImageCorners(radius:2.0), imageSize: (file?.dimensions ?? imageSize).aspectFilled(viewSize), boundingSize: imageSize, intrinsicInsets: NSEdgeInsets())
+        let arguments = TransformImageArguments(corners: ImageCorners(radius:2.0), imageSize: (file?.dimensions?.size ?? imageSize).aspectFilled(viewSize), boundingSize: imageSize, intrinsicInsets: NSEdgeInsets())
 
         if let file = file {
             player.setSignal(signal: cachedMedia(media: file, arguments: arguments, scale: backingScaleFactor), clearInstantly: updated)
@@ -191,11 +193,9 @@ class GIFContainerView: Control {
         player.animatesAlphaOnFirstTransition = !player.hasImage
 
         
-        player.setSignal(iconSignal, cacheImage: { [weak file] image in
+        player.setSignal(iconSignal, cacheImage: { [weak file] result in
             if let file = file {
-                return cacheMedia(signal: image, media: file, arguments: arguments, scale: System.backingScale)
-            } else {
-                return .complete()
+                cacheMedia(result, media: file, arguments: arguments, scale: System.backingScale)
             }
         })
 

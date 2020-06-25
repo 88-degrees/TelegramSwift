@@ -8,9 +8,10 @@
 
 import Foundation
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 import LocalAuthentication
 extension Message {
     
@@ -1656,14 +1657,7 @@ func searchEmojiClue(query: String, postbox: Postbox) -> Signal<[EmojiClue], NoE
 
 func randomInt32() -> Int32 {
     let uRandom = arc4random()
-    let value: Int32
-    let dif = Int(uRandom) - Int(INT32_MAX)
-    if dif > 0 {
-        value = Int32(dif)
-    } else {
-        value = Int32(uRandom)
-    }
-    return value
+    return Int32(bitPattern: uRandom)
 }
 
 
@@ -1924,96 +1918,6 @@ extension CGContext {
 }
 
 
-func ninePartPiecesFromImageWithInsets(_ image: CGImage, capInsets: RHEdgeInsets) -> [CGImage] {
-    
-    let imageWidth: CGFloat  = image.backingSize.width
-    let imageHeight: CGFloat = image.backingSize.height
-    
-    let leftCapWidth: CGFloat = capInsets.left
-    let topCapHeight: CGFloat = capInsets.top
-    let rightCapWidth: CGFloat = capInsets.right
-    let bottomCapHeight: CGFloat = capInsets.bottom
-    
-    let centerSize: NSSize  = NSMakeSize(imageWidth - leftCapWidth - rightCapWidth, imageHeight - topCapHeight - bottomCapHeight);
-    
-    let topLeftCorner: CGImage = imageByReferencingRectOfExistingImage(image, NSMakeRect(0.0, imageHeight - topCapHeight, leftCapWidth, topCapHeight))
-    let topEdgeFill: CGImage = imageByReferencingRectOfExistingImage(image, NSMakeRect(leftCapWidth, imageHeight - topCapHeight, centerSize.width, topCapHeight))
-    let topRightCorner: CGImage = imageByReferencingRectOfExistingImage(image, NSMakeRect(imageWidth - rightCapWidth, imageHeight - topCapHeight, rightCapWidth, topCapHeight))
-    
-    let leftEdgeFill: CGImage = imageByReferencingRectOfExistingImage(image, NSMakeRect(0.0, bottomCapHeight, leftCapWidth, centerSize.height))
-    let centerFill: CGImage = imageByReferencingRectOfExistingImage(image, NSMakeRect(leftCapWidth, bottomCapHeight, centerSize.width, centerSize.height))
-    let rightEdgeFill: CGImage = imageByReferencingRectOfExistingImage(image, NSMakeRect(imageWidth - rightCapWidth, bottomCapHeight, rightCapWidth, centerSize.height))
-    
-    let bottomLeftCorner: CGImage = imageByReferencingRectOfExistingImage(image, NSMakeRect(0.0, 0.0, leftCapWidth, bottomCapHeight))
-    let bottomEdgeFill: CGImage = imageByReferencingRectOfExistingImage(image, NSMakeRect(leftCapWidth, 0.0, centerSize.width, bottomCapHeight))
-    let bottomRightCorner: CGImage = imageByReferencingRectOfExistingImage(image, NSMakeRect(imageWidth - rightCapWidth, 0.0, rightCapWidth, bottomCapHeight))
-    
-    return [topLeftCorner, topEdgeFill, topRightCorner, leftEdgeFill, centerFill, rightEdgeFill, bottomLeftCorner, bottomEdgeFill, bottomRightCorner]
-}
-
-func drawNinePartImage(_ context: CGContext, frame: NSRect, topLeftCorner: CGImage, topEdgeFill: CGImage, topRightCorner: CGImage, leftEdgeFill: CGImage, centerFill: CGImage, rightEdgeFill: CGImage, bottomLeftCorner: CGImage, bottomEdgeFill: CGImage, bottomRightCorner: CGImage){
-    
-    let imageWidth: CGFloat = frame.size.width;
-    let imageHeight: CGFloat = frame.size.height;
-    
-    let leftCapWidth: CGFloat = topLeftCorner.backingSize.width;
-    let topCapHeight: CGFloat = topLeftCorner.backingSize.height;
-    let rightCapWidth: CGFloat = bottomRightCorner.backingSize.width;
-    let bottomCapHeight: CGFloat = bottomRightCorner.backingSize.height;
-    
-    let centerSize = NSMakeSize(imageWidth - leftCapWidth - rightCapWidth, imageHeight - topCapHeight - bottomCapHeight);
-    
-    let topLeftCornerRect: NSRect = NSMakeRect(0.0, imageHeight - topCapHeight, leftCapWidth, topCapHeight);
-    let topEdgeFillRect: NSRect = NSMakeRect(leftCapWidth, imageHeight - topCapHeight, centerSize.width, topCapHeight);
-    let topRightCornerRect: NSRect = NSMakeRect(imageWidth - rightCapWidth, imageHeight - topCapHeight, rightCapWidth, topCapHeight);
-    
-    let leftEdgeFillRect: NSRect = NSMakeRect(0.0, bottomCapHeight, leftCapWidth, centerSize.height);
-    let centerFillRect: NSRect = NSMakeRect(leftCapWidth, bottomCapHeight, centerSize.width, centerSize.height);
-    let rightEdgeFillRect: NSRect = NSMakeRect(imageWidth - rightCapWidth, bottomCapHeight, rightCapWidth, centerSize.height);
-    
-    let bottomLeftCornerRect: NSRect = NSMakeRect(0.0, 0.0, leftCapWidth, bottomCapHeight);
-    let bottomEdgeFillRect: NSRect = NSMakeRect(leftCapWidth, 0.0, centerSize.width, bottomCapHeight);
-    let bottomRightCornerRect: NSRect = NSMakeRect(imageWidth - rightCapWidth, 0.0, rightCapWidth, bottomCapHeight);
-    
-    
-    drawStretchedImageInRect(topLeftCorner, context: context, rect: topLeftCornerRect);
-    drawStretchedImageInRect(topEdgeFill, context: context, rect: topEdgeFillRect);
-    drawStretchedImageInRect(topRightCorner, context: context, rect: topRightCornerRect);
-    
-    drawStretchedImageInRect(leftEdgeFill, context: context, rect: leftEdgeFillRect);
-    drawStretchedImageInRect(centerFill, context: context, rect: centerFillRect);
-    drawStretchedImageInRect(rightEdgeFill, context: context, rect: rightEdgeFillRect);
-    
-    drawStretchedImageInRect(bottomLeftCorner, context: context, rect: bottomLeftCornerRect);
-    drawStretchedImageInRect(bottomEdgeFill, context: context, rect: bottomEdgeFillRect);
-    drawStretchedImageInRect(bottomRightCorner, context: context, rect: bottomRightCornerRect);
-    
-}
-
-
-func imageByReferencingRectOfExistingImage(_ image: CGImage, _ rect: NSRect) -> CGImage {
-    if (!NSIsEmptyRect(rect)){
-        
-        let pixelsHigh = CGFloat(image.height) 
-        
-        let scaleFactor:CGFloat = pixelsHigh / image.backingSize.height
-        var captureRect = NSMakeRect(scaleFactor * rect.origin.x, scaleFactor * rect.origin.y, scaleFactor * rect.size.width, scaleFactor * rect.size.height)
-        
-        captureRect.origin.y = pixelsHigh - captureRect.origin.y - captureRect.size.height;
-        
-        return image.cropping(to: captureRect)!
-    }
-    return image.cropping(to: NSMakeRect(0, 0, image.size.width, image.size.height))!
-}
-
-func drawStretchedImageInRect(_ image: CGImage, context: CGContext, rect: NSRect) -> Void {
-    context.saveGState()
-    context.setBlendMode(.normal) //NSCompositeSourceOver
-    context.clip(to: rect)
-    
-    context.draw(image, in: rect)
-    context.restoreGState()
-}
 
 
 
@@ -2168,14 +2072,22 @@ func quadraticEaseOut <T: FloatingPoint> (_ x: T) -> T {
 
 extension Date {
     var startOfDay: Date {
-        return Calendar.current.startOfDay(for: self)
+        var calendar = NSCalendar.current
+        return calendar.startOfDay(for: self)
+    }
+    
+    var startOfDayUTC: Date {
+        var calendar = NSCalendar.current
+        calendar.timeZone = TimeZone(abbreviation: "UTC")!
+        return calendar.startOfDay(for: self)
     }
     
     var endOfDay: Date {
         var components = DateComponents()
         components.day = 1
         components.second = -1
-        return Calendar.current.date(byAdding: components, to: startOfDay)!
+        var calendar = NSCalendar.current
+        return calendar.date(byAdding: components, to: startOfDay)!
     }
     
     var startOfMonth: Date {
@@ -2201,6 +2113,18 @@ public extension NSAttributedString {
         
         let modified: NSMutableAttributedString = string.mutableCopy() as! NSMutableAttributedString
         
+        
+        var index: Int = 1
+        while true {
+            let range = modified.string.nsstring.range(of: "\t0")
+            if range.location != NSNotFound {
+                modified.replaceCharacters(in: range, with: "\t\(index)")
+                index += 1
+            } else {
+                break
+            }
+        }
+        
         var attachments:[NSTextAttachment] = []
         
         string.enumerateAttributes(in: string.range, options: [], using: { attr, range, _ in
@@ -2213,11 +2137,15 @@ public extension NSAttributedString {
                 }
                 if let string = string {
                     let tag = TGInputTextTag(uniqueId: arc4random64(), attachment: string, attribute: TGInputTextAttribute(name: NSAttributedString.Key.foregroundColor.rawValue, value: theme.colors.link))
-                    modified.addAttribute(NSAttributedString.Key(rawValue: TGCustomLinkAttributeName), value: tag, range: range)
+                    if let tag = tag {
+                        modified.addAttribute(NSAttributedString.Key(rawValue: TGCustomLinkAttributeName), value: tag, range: range)
+                    }
                 }
             } else if let font = attr[.font] as? NSFont {
                 let newFont: NSFont
-                if font.fontDescriptor.symbolicTraits.contains(.bold) {
+                if font.fontDescriptor.symbolicTraits.contains(.bold) && font.fontDescriptor.symbolicTraits.contains(.italic) {
+                    newFont = .boldItalic(theme.fontSize)
+                } else if font.fontDescriptor.symbolicTraits.contains(.bold) {
                     newFont = .bold(theme.fontSize)
                 } else if font.fontDescriptor.symbolicTraits.contains(.italic) {
                     newFont = .italic(theme.fontSize)
@@ -2241,14 +2169,7 @@ public extension NSAttributedString {
             }
         })
         
-        let crossTagsRemove = modified.mutableCopy() as! NSMutableAttributedString
-        modified.enumerateAttribute(NSAttributedString.Key(rawValue: TGCustomLinkAttributeName), in: modified.range, options: [], using: { value, range, _ in
-            if value != nil {
-                crossTagsRemove.addAttribute(.font, value: NSFont.normal(theme.fontSize), range: range)
-            }
-        })
-        crossTagsRemove.addAttribute(.foregroundColor, value: theme.colors.text, range: modified.range)
-        return (crossTagsRemove.trimmed, attachments)
+        return (modified.trimmed, attachments)
     }
     
     func appendAttributedString(_ string: NSAttributedString, selectedRange: NSRange = NSMakeRange(0, 0)) -> (NSAttributedString, NSRange) {
@@ -2278,5 +2199,128 @@ extension Date {
         }
         
         return Int32(bootTime.tv_sec)
+    }
+}
+
+
+
+
+
+private let colorKeyRegex = try? NSRegularExpression(pattern: "\"k\":\\[[\\d\\.]+\\,[\\d\\.]+\\,[\\d\\.]+\\,[\\d\\.]+\\]")
+
+func transformedWithFitzModifier(data: Data, fitzModifier: EmojiFitzModifier?) -> Data {
+    if let fitzModifier = fitzModifier, var string = String(data: data, encoding: .utf8) {
+        let color1: NSColor
+        let color2: NSColor
+        let color3: NSColor
+        let color4: NSColor
+        
+        var colors: [NSColor] = [0xf77e41, 0xffb139, 0xffd140, 0xffdf79].map { NSColor(rgb: $0) }
+        let replacementColors: [NSColor]
+        switch fitzModifier {
+        case .type12:
+            replacementColors = [0xca907a, 0xedc5a5, 0xf7e3c3, 0xfbefd6].map { NSColor(rgb: $0) }
+        case .type3:
+            replacementColors = [0xaa7c60, 0xc8a987, 0xddc89f, 0xe6d6b2].map { NSColor(rgb: $0) }
+        case .type4:
+            replacementColors = [0x8c6148, 0xad8562, 0xc49e76, 0xd4b188].map { NSColor(rgb: $0) }
+        case .type5:
+            replacementColors = [0x6e3c2c, 0x925a34, 0xa16e46, 0xac7a52].map { NSColor(rgb: $0) }
+        case .type6:
+            replacementColors = [0x291c12, 0x472a22, 0x573b30, 0x68493c].map { NSColor(rgb: $0) }
+        }
+        
+        func colorToString(_ color: NSColor) -> String {
+            var r: CGFloat = 0.0
+            var g: CGFloat = 0.0
+            var b: CGFloat = 0.0
+            color.getRed(&r, green: &g, blue: &b, alpha: nil)
+            return "\"k\":[\(r),\(g),\(b),1]"
+        }
+        
+        func match(_ a: Double, _ b: Double, eps: Double) -> Bool {
+            return abs(a - b) < eps
+        }
+        
+        var replacements: [(NSTextCheckingResult, String)] = []
+        
+        if let colorKeyRegex = colorKeyRegex {
+            let results = colorKeyRegex.matches(in: string, range: NSRange(string.startIndex..., in: string))
+            for result in results.reversed()  {
+                if let range = Range(result.range, in: string) {
+                    let substring = String(string[range])
+                    let color = substring[substring.index(string.startIndex, offsetBy: "\"k\":[".count) ..< substring.index(before: substring.endIndex)]
+                    let components = color.split(separator: ",")
+                    if components.count == 4, let r = Double(components[0]), let g = Double(components[1]), let b = Double(components[2]), let a = Double(components[3]) {
+                        if match(a, 1.0, eps: 0.01) {
+                            for i in 0 ..< colors.count {
+                                let color = colors[i]
+                                var cr: CGFloat = 0.0
+                                var cg: CGFloat = 0.0
+                                var cb: CGFloat = 0.0
+                                color.getRed(&cr, green: &cg, blue: &cb, alpha: nil)
+                                if match(r, Double(cr), eps: 0.01) && match(g, Double(cg), eps: 0.01) && match(b, Double(cb), eps: 0.01) {
+                                    replacements.append((result, colorToString(replacementColors[i])))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        for (result, text) in replacements {
+            if let range = Range(result.range, in: string) {
+                string = string.replacingCharacters(in: range, with: text)
+            }
+        }
+        
+        return string.data(using: .utf8) ?? data
+    } else {
+        return data
+    }
+}
+
+
+extension Double {
+    
+    func toString(decimal: Int = 9) -> String {
+        let value = decimal < 0 ? 0 : decimal
+        var string = String(format: "%.\(value)f", self)
+        
+        while string.last == "0" || string.last == "." {
+            if string.last == "." { string = String(string.dropLast()); break}
+            string = String(string.dropLast())
+        }
+        return string
+    }
+}
+
+
+public extension String {
+    func rightJustified(width: Int, pad: String = " ", truncate: Bool = false) -> String {
+        guard width > count else {
+            return truncate ? String(suffix(width)) : self
+        }
+        return String(repeating: pad, count: width - count) + self
+    }
+    
+    func leftJustified(width: Int, pad: String = " ", truncate: Bool = false) -> String {
+        guard width > count else {
+            return truncate ? String(prefix(width)) : self
+        }
+        return self + String(repeating: pad, count: width - count)
+    }
+}
+
+
+
+extension CGImage {
+    var data: Data? {
+        guard let mutableData = CFDataCreateMutable(nil, 0),
+            let destination = CGImageDestinationCreateWithData(mutableData, "public.png" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, self, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return mutableData as Data
     }
 }

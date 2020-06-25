@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 
 public struct InlineLoginOption: OptionSet {
     public var rawValue: Int32
@@ -66,7 +67,7 @@ private func inlineLoginEntries(_ state: InlineLoginState, url: String, accountP
     
     let host = URL(string: url)?.host ?? url
     
-    entries.append(.sectionId(sectionId))
+    entries.append(.sectionId(sectionId, type: .normal))
     sectionId += 1
     
     entries.append(InputDataEntry.custom(sectionId: sectionId, index: index, value: .none, identifier: InputDataIdentifier("title"), equatable: nil, item: { initialSize, stableId in
@@ -81,7 +82,7 @@ private func inlineLoginEntries(_ state: InlineLoginState, url: String, accountP
     }))
     index += 1
     
-    entries.append(.sectionId(sectionId))
+    entries.append(.sectionId(sectionId, type: .normal))
     sectionId += 1
     
     let loginEnabled = state.options.contains(.login)
@@ -120,7 +121,7 @@ private func inlineLoginEntries(_ state: InlineLoginState, url: String, accountP
     }
     
     
-    entries.append(.sectionId(sectionId))
+    entries.append(.sectionId(sectionId, type: .normal))
     sectionId += 1
     
     return entries
@@ -160,11 +161,19 @@ func InlineLoginController(context: AccountContext, url: String, originalURL: St
             authorize(state.options.contains(.allowMessages))
         }
         close?()
-    }, cancelTitle: L10n.modalCancel, drawBorder: true, height: 50)
+    }, drawBorder: true, height: 50, singleButton: true)
     
     let controller = InputDataController(dataSignal: signal, title: L10n.botInlineAuthHeader)
     
+    controller.getBackgroundColor = {
+        theme.colors.background
+    }
+    
     let modalController = InputDataModalController(controller, modalInteractions: interactions)
+    
+    controller.leftModalHeader = ModalHeaderData(image: theme.icons.modalClose, handler: { [weak modalController] in
+        modalController?.close()
+    })
     
     close = { [weak modalController] in
         modalController?.close()

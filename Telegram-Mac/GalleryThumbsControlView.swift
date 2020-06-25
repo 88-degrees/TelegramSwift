@@ -8,7 +8,7 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 class GalleryThumbContainer : Control {
     
@@ -18,11 +18,11 @@ class GalleryThumbContainer : Control {
         super.init(frame: NSZeroRect)
         backgroundColor = .clear
         
-        var signal:Signal<(TransformImageArguments) -> DrawingContext?, NoError>?
+        var signal:Signal<ImageDataTransformation, NoError>?
         var size: NSSize?
         if let item = item as? MGalleryPhotoItem {
             signal = chatWebpageSnippetPhoto(account: item.context.account, imageReference: item.entry.imageReference(item.media), scale: backingScaleFactor, small: true, secureIdAccessContext: item.secureIdAccessContext)
-            size = item.media.representations.first?.dimensions
+            size = item.media.representations.first?.dimensions.size
             item.fetch()
         } else if let item = item as? MGalleryGIFItem {
             signal = chatMessageImageFile(account: item.context.account, fileReference: item.entry.fileReference(item.media), scale: backingScaleFactor)
@@ -31,24 +31,29 @@ class GalleryThumbContainer : Control {
             signal = chatMessageImageFile(account: item.context.account, fileReference: item.entry.fileReference(item.media), scale: backingScaleFactor)
             size = item.media.videoSize
         } else if let item = item as? MGalleryPeerPhotoItem {
-            signal = chatMessagePhotoThumbnail(account: item.context.account, imageReference: item.entry.imageReference(item.media), scale: backingScaleFactor)
+            signal = chatMessagePhoto(account: item.context.account, imageReference: item.entry.imageReference(item.media), scale: backingScaleFactor)
             
-            size = item.media.representations.first?.dimensions
+            size = item.media.representations.first?.dimensions.size
             item.fetch()
         }
         
 
         if let signal = signal, let size = size {
             imageView.setSignal(signal)
-            let arguments = TransformImageArguments(corners: ImageCorners(), imageSize:size.aspectFilled(NSMakeSize(50, 50)), boundingSize: NSMakeSize(50, 50), intrinsicInsets: NSEdgeInsets())
+            let arguments = TransformImageArguments(corners: ImageCorners(), imageSize:size.aspectFilled(NSMakeSize(80, 80)), boundingSize: NSMakeSize(80, 80), intrinsicInsets: NSEdgeInsets())
             imageView.set(arguments: arguments)
         }
-        overlay.setFrameSize(50, 50)
-        imageView.setFrameSize(50, 50)
+        overlay.setFrameSize(80, 80)
+        imageView.setFrameSize(80, 80)
         addSubview(imageView)
         addSubview(overlay)
         overlay.backgroundColor = .black
         layer?.cornerRadius = .cornerRadius
+    }
+    
+    deinit {
+        var bp:Int = 0
+        bp += 1
     }
     
     override func layout() {
@@ -65,9 +70,11 @@ class GalleryThumbContainer : Control {
     
 }
 
+
+
 class GalleryThumbsControlView: View {
 
-    private let scrollView: ScrollView = ScrollView()
+    private let scrollView: HorizontalScrollView = HorizontalScrollView()
     private let documentView: View = View()
     private var selectedView: View?
     required init(frame frameRect: NSRect) {

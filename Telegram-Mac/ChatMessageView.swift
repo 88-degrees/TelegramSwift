@@ -8,12 +8,12 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 class ChatMessageView: ChatRowView, ModalPreviewRowViewProtocol {
     
     
     
-    func fileAtPoint(_ point: NSPoint) -> QuickPreviewMedia? {
+    func fileAtPoint(_ point: NSPoint) -> (QuickPreviewMedia, NSView?)? {
         if let webpageContent = webpageContent {
             return webpageContent.fileAtPoint(convert(point, from: self))
         }
@@ -135,11 +135,11 @@ class ChatMessageView: ChatRowView, ModalPreviewRowViewProtocol {
                 actionButton?.removeAllHandlers()
                 actionButton?.set(handler: { [weak item] _ in
                     item?.invokeAction()
-                    }, for: .Click)
+                }, for: .Click)
                 actionButton?.set(text: text, for: .Normal)
                 actionButton?.layer?.borderColor = item.wpPresentation.activity.cgColor
                 actionButton?.set(color: item.wpPresentation.activity, for: .Normal)
-                _ = actionButton?.sizeToFit(NSZeroSize, NSMakeSize(item.contentSize.width, 30), thatFit: true)
+                _ = actionButton?.sizeToFit(NSZeroSize, NSMakeSize(item.actionButtonWidth, 30), thatFit: true)
                 
             } else {
                 actionButton?.removeFromSuperview()

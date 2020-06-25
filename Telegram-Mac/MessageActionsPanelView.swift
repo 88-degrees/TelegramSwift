@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 
 
 
@@ -37,11 +38,11 @@ class MessageActionsPanelView: Control, Notifable {
         addSubview(forwardButton)
         addSubview(countTitle)
         
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
     }
     
     private var buttonActiveStyle:ControlStyle {
-        return ControlStyle(font:.normal(.header), foregroundColor: theme.colors.grayText, backgroundColor: theme.colors.background, highlightColor: theme.colors.blueIcon)
+        return ControlStyle(font:.normal(.header), foregroundColor: theme.colors.grayText, backgroundColor: theme.colors.background, highlightColor: theme.colors.accentIcon)
     }
     private var deleteButtonActiveStyle:ControlStyle {
         return ControlStyle(font:.normal(.header), foregroundColor: theme.colors.grayText, backgroundColor: theme.colors.background, highlightColor: theme.colors.redUI)
@@ -80,7 +81,7 @@ class MessageActionsPanelView: Control, Notifable {
         forwardButton.userInteractionEnabled = canForward
         
         deleteButton.set(color: !canDelete ? theme.colors.grayText : theme.colors.redUI, for: .Normal)
-        forwardButton.set(color: !canForward ? theme.colors.grayText : theme.colors.blueUI, for: .Normal)
+        forwardButton.set(color: !canForward ? theme.colors.grayText : theme.colors.accent, for: .Normal)
         
         deleteButton.set(image: !deleteButton.userInteractionEnabled ? theme.icons.chatDeleteMessagesInactive : theme.icons.chatDeleteMessagesActive, for: .Normal)
         forwardButton.set(image: !forwardButton.userInteractionEnabled ? theme.icons.chatForwardMessagesInactive : theme.icons.chatForwardMessagesActive, for: .Normal)
@@ -126,9 +127,9 @@ class MessageActionsPanelView: Control, Notifable {
     }
     
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
-        
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         deleteButton.set(text: tr(L10n.messageActionsPanelDelete), for: .Normal)
         forwardButton.set(text: tr(L10n.messageActionsPanelForward), for: .Normal)
         
@@ -136,10 +137,10 @@ class MessageActionsPanelView: Control, Notifable {
         forwardButton.set(image: !forwardButton.userInteractionEnabled ? theme.icons.chatForwardMessagesInactive : theme.icons.chatForwardMessagesActive, for: .Normal)
         
         deleteButton.set(color: !deleteButton.userInteractionEnabled ? theme.colors.grayText : theme.colors.redUI, for: .Normal)
-        forwardButton.set(color: !forwardButton.userInteractionEnabled ? theme.colors.grayText : theme.colors.blueUI, for: .Normal)
+        forwardButton.set(color: !forwardButton.userInteractionEnabled ? theme.colors.grayText : theme.colors.accent, for: .Normal)
         
-        deleteButton.sizeToFit(NSZeroSize, NSMakeSize(0, frame.height))
-        forwardButton.sizeToFit(NSZeroSize, NSMakeSize(0, frame.height))
+        _ = deleteButton.sizeToFit(NSZeroSize, NSMakeSize(0, frame.height))
+        _ = forwardButton.sizeToFit(NSZeroSize, NSMakeSize(0, frame.height))
         
         deleteButton.style = deleteButtonActiveStyle
         forwardButton.style = buttonActiveStyle

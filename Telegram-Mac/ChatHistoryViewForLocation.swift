@@ -8,9 +8,10 @@
 
 import Cocoa
 
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 import TGUIKit
 
 enum ChatHistoryInitialSearchLocation {
@@ -52,7 +53,7 @@ func ==(lhs: ChatHistoryLocation, rhs: ChatHistoryLocation) -> Bool {
     case let .Navigation(lhsIndex, lhsAnchorIndex, lhsCount, lhsSide):
         switch rhs {
         case let .Navigation(rhsIndex, rhsAnchorIndex, rhsCount, rhsSide) where lhsIndex == rhsIndex && lhsAnchorIndex == rhsAnchorIndex && lhsCount == rhsCount && lhsSide == rhsSide:
-            return false
+            return true
         default:
             return false
         }
@@ -122,18 +123,29 @@ enum ChatHistoryViewUpdate {
 }
 
 
-func chatHistoryViewForLocation(_ location: ChatHistoryLocation, account: Account, chatLocation: ChatLocation, fixedCombinedReadStates: (()->MessageHistoryViewReadState?)?, tagMask: MessageTags?, additionalData: [AdditionalMessageHistoryViewData] = [], orderStatistics: MessageHistoryViewOrderStatistics = []) -> Signal<ChatHistoryViewUpdate, NoError> {
+func chatHistoryViewForLocation(_ location: ChatHistoryLocation, account: Account, chatLocation: ChatLocation, fixedCombinedReadStates: (()->MessageHistoryViewReadState?)?, tagMask: MessageTags?, mode: ChatMode = .history, additionalData: [AdditionalMessageHistoryViewData] = [], orderStatistics: MessageHistoryViewOrderStatistics = []) -> Signal<ChatHistoryViewUpdate, NoError> {
+    
+    
+
     
     switch location {
     case let .Initial(count):
         var preloaded = false
         var fadeIn = false
         let signal: Signal<(MessageHistoryView, ViewUpdateType, InitialMessageHistoryData?), NoError>
-        if let tagMask = tagMask {
-            signal = account.viewTracker.aroundMessageHistoryViewForLocation(chatLocation, index: MessageHistoryAnchorIndex.upperBound, anchorIndex: MessageHistoryAnchorIndex.upperBound, count: count, fixedCombinedReadStates: nil, tagMask: tagMask, orderStatistics: orderStatistics, additionalData: additionalData)
-        } else {
-            signal = account.viewTracker.aroundMessageOfInterestHistoryViewForLocation(chatLocation, count: count, tagMask: tagMask, orderStatistics: orderStatistics, additionalData: additionalData)
+        
+        switch mode {
+        case .history:
+            if let tagMask = tagMask {
+                signal = account.viewTracker.aroundMessageHistoryViewForLocation(chatLocation, index: .upperBound, anchorIndex: .upperBound, count: count, fixedCombinedReadStates: nil, tagMask: tagMask, orderStatistics: orderStatistics)
+            } else {
+                signal = account.viewTracker.aroundMessageOfInterestHistoryViewForLocation(chatLocation, count: count, tagMask: tagMask, orderStatistics: orderStatistics, additionalData: additionalData)
+            }
+        case .scheduled:
+            signal = account.viewTracker.scheduledMessagesViewForLocation(chatLocation)
         }
+        
+        
         return signal |> map { view, updateType, initialData -> ChatHistoryViewUpdate in
             let (cachedData, cachedDataMessages, readStateData, limitsConfiguration, autoplayMedia, autodownloadSettings) = extractAdditionalData(view: view, chatLocation: chatLocation)
             let combinedInitialData = ChatHistoryCombinedInitialData(initialData: initialData, buttonKeyboardMessage: view.topTaggedMessages.first, cachedData: cachedData, cachedDataMessages: cachedDataMessages, readStateData: readStateData, limitsConfiguration: limitsConfiguration, autoplayMedia: autoplayMedia, autodownloadSettings: autodownloadSettings)
@@ -200,12 +212,20 @@ func chatHistoryViewForLocation(_ location: ChatHistoryLocation, account: Accoun
         var fadeIn = false
         
         let signal: Signal<(MessageHistoryView, ViewUpdateType, InitialMessageHistoryData?), NoError>
-        switch searchLocation {
-        case let .index(index):
-            signal = account.viewTracker.aroundMessageHistoryViewForLocation(chatLocation, index: MessageHistoryAnchorIndex.message(index), anchorIndex: MessageHistoryAnchorIndex.message(index), count: count, fixedCombinedReadStates: nil, tagMask: tagMask, orderStatistics: orderStatistics, additionalData: additionalData)
-        case let .id(id):
-            signal = account.viewTracker.aroundIdMessageHistoryViewForLocation(chatLocation, count: count, messageId: id, tagMask: tagMask, orderStatistics: orderStatistics, additionalData: additionalData)
+        
+        switch mode {
+        case .history:
+            switch searchLocation {
+            case let .index(index):
+                signal = account.viewTracker.aroundMessageHistoryViewForLocation(chatLocation, index: MessageHistoryAnchorIndex.message(index), anchorIndex: MessageHistoryAnchorIndex.message(index), count: count, fixedCombinedReadStates: nil, tagMask: tagMask, orderStatistics: orderStatistics, additionalData: additionalData)
+            case let .id(id):
+                signal = account.viewTracker.aroundIdMessageHistoryViewForLocation(chatLocation, count: count, messageId: id, tagMask: tagMask, orderStatistics: orderStatistics, additionalData: additionalData)
+            }
+        case .scheduled:
+            signal = account.viewTracker.scheduledMessagesViewForLocation(chatLocation)
         }
+        
+        
         
         return signal |> map { view, updateType, initialData -> ChatHistoryViewUpdate in
             let (cachedData, cachedDataMessages, readStateData, limitsConfiguration, autoplayMedia, autodownloadSettings) = extractAdditionalData(view: view, chatLocation: chatLocation)
@@ -253,7 +273,15 @@ func chatHistoryViewForLocation(_ location: ChatHistoryLocation, account: Accoun
                
                 var scroll: TableScrollState
                 if view.entries.count > targetIndex {
-                    scroll = .center(id: ChatHistoryEntryId.message(view.entries[targetIndex].message), innerId: nil, animated: false, focus: true, inset: 0)
+                    let focusMessage = view.entries[targetIndex].message
+                    let mustToFocus: Bool
+                    switch searchLocation {
+                    case let .index(index):
+                        mustToFocus = view.entries[targetIndex].index == index
+                    case let .id(id):
+                        mustToFocus = view.entries[targetIndex].message.id == id
+                    }
+                    scroll = .center(id: ChatHistoryEntryId.message(focusMessage), innerId: nil, animated: false, focus: .init(focus: mustToFocus), inset: 0)
                 } else {
                     scroll = .none(nil)
                 }
@@ -264,7 +292,15 @@ func chatHistoryViewForLocation(_ location: ChatHistoryLocation, account: Accoun
     case let .Navigation(index, anchorIndex, count, _):
         var first = true
         
-        return account.viewTracker.aroundMessageHistoryViewForLocation(chatLocation, index: index, anchorIndex: anchorIndex, count: count, fixedCombinedReadStates: fixedCombinedReadStates?(), tagMask: tagMask, orderStatistics: orderStatistics, additionalData: additionalData) |> map { view, updateType, initialData -> ChatHistoryViewUpdate in
+        let signal:Signal<(MessageHistoryView, ViewUpdateType, InitialMessageHistoryData?), NoError>
+        switch mode {
+        case .history:
+            signal = account.viewTracker.aroundMessageHistoryViewForLocation(chatLocation, index: index, anchorIndex: anchorIndex, count: count, fixedCombinedReadStates: fixedCombinedReadStates?(), tagMask: tagMask, orderStatistics: orderStatistics, additionalData: additionalData)
+        case .scheduled:
+            signal = account.viewTracker.scheduledMessagesViewForLocation(chatLocation)
+        }
+        
+        return signal |> map { view, updateType, initialData -> ChatHistoryViewUpdate in
             
             let (cachedData, cachedDataMessages, readStateData, limitsConfiguration, autoplayMedia, autodownloadSettings) = extractAdditionalData(view: view, chatLocation: chatLocation)
             let combinedInitialData = ChatHistoryCombinedInitialData(initialData: initialData, buttonKeyboardMessage: view.topTaggedMessages.first, cachedData: cachedData, cachedDataMessages: cachedDataMessages, readStateData: readStateData, limitsConfiguration: limitsConfiguration, autoplayMedia: autoplayMedia, autodownloadSettings: autodownloadSettings)
@@ -283,7 +319,15 @@ func chatHistoryViewForLocation(_ location: ChatHistoryLocation, account: Accoun
         let chatScrollPosition = ChatHistoryViewScrollPosition.index(index: index, position: scrollPosition, directionHint: directionHint, animated: animated)
         var first = true
         
-        return account.viewTracker.aroundMessageHistoryViewForLocation(chatLocation, index: index, anchorIndex: anchorIndex, count: count, fixedCombinedReadStates: fixedCombinedReadStates?(), tagMask: tagMask, orderStatistics: orderStatistics, additionalData: additionalData) |> map { view, updateType, initialData -> ChatHistoryViewUpdate in
+        let signal:Signal<(MessageHistoryView, ViewUpdateType, InitialMessageHistoryData?), NoError>
+        switch mode {
+        case .history:
+            signal = account.viewTracker.aroundMessageHistoryViewForLocation(chatLocation, index: index, anchorIndex: anchorIndex, count: count, fixedCombinedReadStates: fixedCombinedReadStates?(), tagMask: tagMask, orderStatistics: orderStatistics, additionalData: additionalData)
+        case .scheduled:
+            signal = account.viewTracker.scheduledMessagesViewForLocation(chatLocation)
+        }
+        
+        return signal |> map { view, updateType, initialData -> ChatHistoryViewUpdate in
             let (cachedData, cachedDataMessages, readStateData, limitsConfiguration, autoplayMedia, autodownloadSettings) = extractAdditionalData(view: view, chatLocation: chatLocation)
             let combinedInitialData = ChatHistoryCombinedInitialData(initialData: initialData, buttonKeyboardMessage: view.topTaggedMessages.first, cachedData: cachedData, cachedDataMessages: cachedDataMessages, readStateData: readStateData, limitsConfiguration: limitsConfiguration, autoplayMedia: autoplayMedia, autodownloadSettings: autodownloadSettings)
             

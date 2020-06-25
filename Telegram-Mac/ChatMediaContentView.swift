@@ -7,11 +7,11 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
-import PostboxMac
-import TelegramCoreMac
+import SwiftSignalKit
+import Postbox
+import TelegramCore
+import SyncCore
 import TGUIKit
-import Lottie
 
 
 class ChatMediaContentView: Control, NSDraggingSource, NSPasteboardItemDataProvider {
@@ -43,6 +43,9 @@ class ChatMediaContentView: Control, NSDraggingSource, NSPasteboardItemDataProvi
     
     weak var table:TableView?
     
+    override func updateTrackingAreas() {
+        
+    }
     
     override init() {
         super.init()
@@ -79,11 +82,15 @@ class ChatMediaContentView: Control, NSDraggingSource, NSPasteboardItemDataProvi
     
     func delete() -> Void {
         cancel()
-        if let parentId = parent?.id {
+        if let parentId = parent?.id, let mediaBox = context?.account.postbox.mediaBox {
             _ = context?.account.postbox.transaction({ transaction -> Void in
-                transaction.deleteMessages([parentId])
+                deleteMessages(transaction: transaction, mediaBox: mediaBox, ids: [parentId])
             }).start()
         }
+    }
+    
+    override var allowsVibrancy: Bool {
+        return true
     }
     
     func cancelFetching() {
@@ -224,6 +231,12 @@ class ChatMediaContentView: Control, NSDraggingSource, NSPasteboardItemDataProvi
     }
     
     override func mouseDown(with event: NSEvent) {
+        
+        if event.modifierFlags.contains(.control) {
+            super.mouseDown(with: event)
+            return
+        }
+        
         if userInteractionEnabled {
             inDragging = false
             dragpath = nil
@@ -245,6 +258,8 @@ class ChatMediaContentView: Control, NSDraggingSource, NSPasteboardItemDataProvi
         case .outsideApplication:
             return .copy
         case .withinApplication:
+            return []
+        @unknown default:
             return []
         }
     }
@@ -313,6 +328,12 @@ class ChatMediaContentView: Control, NSDraggingSource, NSPasteboardItemDataProvi
     }
     
     override func mouseUp(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) {
+            super.mouseUp(with: event)
+            return
+        }
+        
+        
         if !inDragging && draggingAbility(event) && userInteractionEnabled, event.clickCount <= 1 {
             executeInteraction(false)
         } else {

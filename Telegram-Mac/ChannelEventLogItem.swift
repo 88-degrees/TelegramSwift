@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
+import Postbox
+import TelegramCore
+import SyncCore
 
 private struct ServiceEventLogMessagePanel {
     let header:TextViewLayout
@@ -91,7 +92,7 @@ private class ServiceEventLogMessagePanelView : View {
     }
     override func draw(_ layer: CALayer, in ctx: CGContext) {
         super.draw(layer, in: ctx)
-        ctx.setFillColor(theme.colors.blueFill.cgColor)
+        ctx.setFillColor(theme.colors.accent.cgColor)
         let radius:CGFloat = 1.0
         ctx.fill(NSMakeRect(0, radius, 2, layer.bounds.height - radius * 2))
         ctx.fillEllipse(in: CGRect(origin: CGPoint(), size: CGSize(width: radius + radius, height: radius + radius)))
@@ -325,9 +326,9 @@ class ServiceEventLogItem: TableRowItem {
                 serviceInfo = ServiceTextInfo(text: text, firstLink: peerLink, secondLink: secondaryLink)
             case let .participantToggleAdmin(prev, new):
                 switch prev.participant {
-                case let .member(memberId, _, adminInfo: prevAdminInfo, banInfo: _):
+                case let .member(memberId, _, adminInfo: prevAdminInfo, banInfo: _, rank: prevRank):
                     switch new.participant {
-                    case let .member(_, _, adminInfo: newAdminInfo, banInfo: _):
+                    case let .member(_, _, adminInfo: newAdminInfo, banInfo: _, rank: newRank):
                         if let memberPeer = result.peers[memberId] {
                             let message = NSMutableAttributedString()
                    
@@ -338,21 +339,56 @@ class ServiceEventLogItem: TableRowItem {
                                 removedRights = prevAdminInfo.rights.flags.subtracting(newAdminInfo?.rights.flags ?? [])
                             }
                             
-                            _ = message.append(string: prevAdminInfo != nil ? tr(L10n.eventLogServicePromotedChanged(memberPeer.displayTitle, memberPeer.addressName != nil ? "(@\(memberPeer.addressName!))" : "")) : tr(L10n.eventLogServicePromoted(memberPeer.displayTitle, memberPeer.addressName != nil ? "(@\(memberPeer.addressName!))" : "")), color: theme.colors.text)
+                            var justRankUpdated: Bool = false
                             
-                            
-                            for right in result.rightsHelp.order {
-                                if addedRights.contains(right) {
-                                    _ = message.append(string: "\n+ \(right.localizedString)", color: theme.colors.text)
+                            if prevRank != newRank {
+                                let rank = newRank ?? L10n.chatAdminBadge
+                                if removedRights.isEmpty && addedRights.isEmpty {
+                                    _ = message.append(string: L10n.channelEventLogMessageRankName(memberPeer.addressName != nil ? "(@\(memberPeer.addressName!))" : "", rank), color: theme.colors.text)
+                                    justRankUpdated = true
                                 }
                             }
-                            if !removedRights.isEmpty {
+                            if !justRankUpdated {
+                                _ = message.append(string: prevAdminInfo != nil ? L10n.eventLogServicePromotedChanged(memberPeer.displayTitle, memberPeer.addressName != nil ? "(@\(memberPeer.addressName!))" : "") : L10n.eventLogServicePromoted(memberPeer.displayTitle, memberPeer.addressName != nil ? "(@\(memberPeer.addressName!))" : ""), color: theme.colors.text)
+                                
+                                
                                 for right in result.rightsHelp.order {
-                                    if removedRights.contains(right) {
-                                        _ = message.append(string: "\n- \(right.localizedString)", color: theme.colors.text)
+                                    if addedRights.contains(right) {
+                                        _ = message.append(string: "\n+ \(right.localizedString)", color: theme.colors.text)
+                                    }
+                                }
+                                if !removedRights.isEmpty {
+                                    for right in result.rightsHelp.order {
+                                        if removedRights.contains(right) {
+                                            _ = message.append(string: "\n- \(right.localizedString)", color: theme.colors.text)
+                                        }
+                                    }
+                                }
+                                
+                                if prevRank != newRank {
+                                    if let rank = newRank, !rank.isEmpty {
+                                        _ = message.append(string: "\n" + L10n.channelEventLogServicePlusTitle(rank), color: theme.colors.text)
+                                    } else {
+                                        _ = message.append(string: "\n" + L10n.channelEventLogServiceMinusTitle, color: theme.colors.text)
                                     }
                                 }
                             }
+                        
+                            
+                            message.addAttribute(NSAttributedString.Key.font, value: NSFont.italic(.text), range: message.range)
+                            message.detectLinks(type: [.Mentions, .Hashtags], context: chatInteraction.context, color: theme.colors.link, openInfo: chatInteraction.openInfo, hashtag: nil, command: nil)
+                            
+                            message.add(link: inAppLink.peerInfo(link: "", peerId: memberId, action: nil, openChat: false, postId: nil, callback: chatInteraction.openInfo), for: message.string.nsstring.range(of: memberPeer.displayTitle))
+                            self.contentMessageItem = ServiceEventLogMessageContentItem(peer: peer, chatInteraction: chatInteraction, name: TextViewLayout(contentName, maximumNumberOfLines: 1), date: TextViewLayout(date), content: TextViewLayout(message))
+                            
+                        }
+                    case let .creator(memberId, _):
+                        if let memberPeer = result.peers[memberId] {
+                            let message = NSMutableAttributedString()
+                            
+                            
+                            _ = message.append(string: L10n.channelEventLogMessageTransferedName(memberPeer.displayTitle, memberPeer.addressName != nil ? "(@\(memberPeer.addressName!))" : ""), color: theme.colors.text)
+                            
                             
                             
                             message.addAttribute(NSAttributedString.Key.font, value: NSFont.italic(.text), range: message.range)
@@ -362,11 +398,25 @@ class ServiceEventLogItem: TableRowItem {
                             self.contentMessageItem = ServiceEventLogMessageContentItem(peer: peer, chatInteraction: chatInteraction, name: TextViewLayout(contentName, maximumNumberOfLines: 1), date: TextViewLayout(date), content: TextViewLayout(message))
                             
                         }
+                    }
+                case let .creator(id, prevRank):
+                    switch new.participant {
+                    case .creator(id, let newRank):
+                        if prevRank != newRank, let memberPeer = result.peers[id] {
+                            
+                            let message = NSMutableAttributedString()
+                            
+                            let rank = newRank ?? L10n.chatOwnerBadge
+                            _ = message.append(string: L10n.channelEventLogMessageRankName(memberPeer.addressName != nil ? "(@\(memberPeer.addressName!))" : "", rank), color: theme.colors.text)
+                            message.addAttribute(NSAttributedString.Key.font, value: NSFont.italic(.text), range: message.range)
+                            message.detectLinks(type: [.Mentions, .Hashtags], context: chatInteraction.context, color: theme.colors.link, openInfo: chatInteraction.openInfo, hashtag: nil, command: nil)
+                            message.add(link: inAppLink.peerInfo(link: "", peerId: id, action: nil, openChat: false, postId: nil, callback: chatInteraction.openInfo), for: message.string.nsstring.range(of: memberPeer.displayTitle))
+                            self.contentMessageItem = ServiceEventLogMessageContentItem(peer: peer, chatInteraction: chatInteraction, name: TextViewLayout(contentName, maximumNumberOfLines: 1), date: TextViewLayout(date), content: TextViewLayout(message))
+                            
+                        }
                     default:
                         break
                     }
-                default:
-                    break
                 }
             case .deleteMessage:
                 serviceInfo = ServiceTextInfo(text: L10n.eventLogServiceDeletedMessage(peer.displayTitle), firstLink: peerLink, secondLink: nil)
@@ -382,9 +432,9 @@ class ServiceEventLogItem: TableRowItem {
                 }
             case let .participantToggleBan(prev, new):
                 switch prev.participant {
-                case let .member(memberId, _, adminInfo: _, banInfo: prevBanInfo):
+                case let .member(memberId, _, adminInfo: _, banInfo: prevBanInfo, rank: _):
                     switch new.participant {
-                    case let .member(_, _, adminInfo: _, banInfo: newBanInfo):
+                    case let .member(_, _, adminInfo: _, banInfo: newBanInfo, rank: _):
                         let message = NSMutableAttributedString()
                         if let memberPeer = result.peers[memberId] {
                             
@@ -433,10 +483,6 @@ class ServiceEventLogItem: TableRowItem {
                                     }
                                 }
                             }
-                            
-                            
-                            
-                            
                             message.addAttribute(NSAttributedString.Key.font, value: NSFont.italic(.text), range: message.range)
                             message.detectLinks(type: [.Mentions, .Hashtags], context: chatInteraction.context, color: theme.colors.link, openInfo: chatInteraction.openInfo, hashtag: nil, command: nil)
                             
@@ -477,14 +523,17 @@ class ServiceEventLogItem: TableRowItem {
                     
                     let size = NSMakeSize(70, 70)
                     imageArguments = TransformImageArguments(corners: ImageCorners(radius: size.width / 2), imageSize: size, boundingSize: size, intrinsicInsets: NSEdgeInsets())
-                    image = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: new, immediateThumbnailData: nil, reference: nil, partialReference: nil)
+                    image = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: new, immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
                 }
                 serviceInfo = ServiceTextInfo(text: text, firstLink: peerLink, secondLink: nil)
             case .participantLeave:
                 let text:String = result.isGroup ? tr(L10n.groupEventLogServiceUpdateLeft(peer.displayTitle)) : tr(L10n.channelEventLogServiceUpdateLeft(peer.displayTitle))
                 serviceInfo = ServiceTextInfo(text: text, firstLink: peerLink, secondLink: nil)
             case .participantJoin:
-                let text:String = result.isGroup ? tr(L10n.groupEventLogServiceUpdateJoin(peer.displayTitle)) : tr(L10n.channelEventLogServiceUpdateJoin(peer.displayTitle))
+                let text:String = result.isGroup ? L10n.groupEventLogServiceUpdateJoin(peer.displayTitle) : L10n.channelEventLogServiceUpdateJoin(peer.displayTitle)
+                serviceInfo = ServiceTextInfo(text: text, firstLink: peerLink, secondLink: nil)
+            case let .updateSlowmode(_, newValue):
+                let text:String = newValue == nil || newValue == 0 ? L10n.channelEventLogServiceDisabledSlowMode(peer.displayTitle) : L10n.channelEventLogServiceSetSlowMode(peer.displayTitle, autoremoveLocalized(Int(newValue!)))
                 serviceInfo = ServiceTextInfo(text: text, firstLink: peerLink, secondLink: nil)
             case let .updateDefaultBannedRights(prev, new):
                 
@@ -547,7 +596,7 @@ class ServiceEventLogItem: TableRowItem {
                 
                 let panel:ServiceEventLogMessagePanel?
                 if let _ = changedInfo.panelText {
-                    panel = ServiceEventLogMessagePanel(header: TextViewLayout(.initialize(string: changedInfo.panelText, color: theme.colors.blueUI, font: .medium(.text)), maximumNumberOfLines: 1), content: TextViewLayout(prevContentAttributed))
+                    panel = ServiceEventLogMessagePanel(header: TextViewLayout(.initialize(string: changedInfo.panelText, color: theme.colors.accent, font: .medium(.text)), maximumNumberOfLines: 1), content: TextViewLayout(prevContentAttributed))
                 } else {
                     panel = nil
                 }
@@ -664,7 +713,7 @@ class ChannelEventLogEditedPanelItem : TableRowItem {
     init(_ initialSize: NSSize, previous:Message, item:ChatRowItem) {
         self.previous = previous
         self.associatedItem = item
-        let header = TextViewLayout(.initialize(string: tr(L10n.channelEventLogOriginalMessage), color: theme.colors.blueUI, font: .medium(.text)), maximumNumberOfLines: 1)
+        let header = TextViewLayout(.initialize(string: tr(L10n.channelEventLogOriginalMessage), color: theme.colors.accent, font: .medium(.text)), maximumNumberOfLines: 1)
         
         let text = TextViewLayout(.initialize(string: previous.text.isEmpty ? tr(L10n.channelEventLogEmpty) : previous.text, color: theme.colors.text, font: .italic(.text)))
        

@@ -7,7 +7,7 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
+import SwiftSignalKit
 import TGUIKit
 
 
@@ -193,7 +193,7 @@ class GalleryTouchBar: NSTouchBar, NSTouchBarDelegate {
             case .youtube:
                 button.bezelColor = .redUI
             case .vimeo:
-                button.bezelColor = .blueUI
+                button.bezelColor = .accent
             case .none:
                 button.bezelColor = nil
             }

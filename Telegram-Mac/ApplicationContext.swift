@@ -1,9 +1,10 @@
 import Foundation
 import TGUIKit
-import SwiftSignalKitMac
-import PostboxMac
-import TelegramCoreMac
-import MtProtoKitMac
+import SwiftSignalKit
+import Postbox
+import TelegramCore
+import SyncCore
+
 import IOKit
 
 private final class AuthModalController : ModalController {
@@ -23,12 +24,17 @@ private final class AuthModalController : ModalController {
 }
 
 
+
+
+
 final class UnauthorizedApplicationContext {
     let account: UnauthorizedAccount
     let rootController: MajorNavigationController
     let window:Window
     let modal: ModalController
     let sharedContext: SharedAccountContext
+    
+    private let updatesDisposable: DisposableSet = DisposableSet()
     
     var rootView: NSView {
         return rootController.view
@@ -40,6 +46,8 @@ final class UnauthorizedApplicationContext {
         window.maxSize = NSMakeSize(.greatestFiniteMagnitude, .greatestFiniteMagnitude)
         window.minSize = NSMakeSize(380, 500)
         
+        
+        updatesDisposable.add(managedAppConfigurationUpdates(accountManager: sharedContext.accountManager, network: account.network).start())
         
         if !window.initFromSaver {
             window.setFrame(NSMakeRect(0, 0, 800, 650), display: true)
@@ -60,25 +68,16 @@ final class UnauthorizedApplicationContext {
         rootController.alwaysAnimate = true
 
         
-        
-//        for (key, _) in UserDefaults.standard.dictionaryRepresentation() {
-//            UserDefaults.standard.removeObject(forKey: key)
-//        }
-//        UserDefaults.standard.synchronize()
-        
-        
         account.shouldBeServiceTaskMaster.set(.single(.now))
         
-      
-
-        
-        
+ 
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(receiveWakeNote(_:)), name: NSWorkspace.screensDidWakeNotification, object: nil)
         
     }
     
     deinit {
         account.shouldBeServiceTaskMaster.set(.single(.never))
+        updatesDisposable.dispose()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
     
@@ -123,8 +122,8 @@ final class AuthorizedApplicationContext: NSObject, SplitViewDelegate {
     private let someActionsDisposable = DisposableSet()
     private let clearReadNotifiesDisposable = MetaDisposable()
     private let chatUndoManagerDisposable = MetaDisposable()
-    
-    
+    private let appUpdateDisposable = MetaDisposable()
+    private let updatesDisposable = MetaDisposable()
     private let _ready:Promise<Bool> = Promise()
     var ready: Signal<Bool, NoError> {
         return _ready.get() |> filter { $0 } |> take (1)
@@ -132,7 +131,7 @@ final class AuthorizedApplicationContext: NSObject, SplitViewDelegate {
     
     func applyNewTheme() {
         rightController.backgroundColor = theme.colors.background
-        rightController.backgroundMode = theme.backgroundMode
+        rightController.backgroundMode = theme.controllerBackgroundMode
         splitView.backgroundColor = theme.colors.background
     }
     
@@ -147,13 +146,10 @@ final class AuthorizedApplicationContext: NSObject, SplitViewDelegate {
         window.maxSize = NSMakeSize(.greatestFiniteMagnitude, .greatestFiniteMagnitude)
         window.minSize = NSMakeSize(380, 500)
         
-        
-        
         if !window.initFromSaver {
             window.setFrame(NSMakeRect(0, 0, 800, 650), display: true)
             window.center()
         }
-        
         
         context.account.importableContacts.set(.single([:]))
         
@@ -176,16 +172,10 @@ final class AuthorizedApplicationContext: NSObject, SplitViewDelegate {
             return view
         }))
         
-        rightController.set(undoHeader: UndoNavigationHeader(35, initializer: { header -> NavigationHeaderView in
-            let view = UndoOverlayHeaderView(header, manager: context.chatUndoManager)
-            return view
-        }))
-        
         window.rootViewController = rightController
         
         leftController = MainViewController(context);
 
-        
         
         leftController.navigationController = rightController
         
@@ -193,9 +183,11 @@ final class AuthorizedApplicationContext: NSObject, SplitViewDelegate {
         super.init()
         
         
+        updatesDisposable.set(managedAppConfigurationUpdates(accountManager: context.sharedContext.accountManager, network: context.account.network).start())
+        
         context.sharedContext.bindings = AccountContextBindings(rootNavigation: { [weak self] () -> MajorNavigationController in
             guard let `self` = self else {
-                fatalError("Cannot use bindings. Application context is not exists")
+                return MajorNavigationController(ViewController.self, ViewController(), window)
             }
             return self.rightController
         }, mainController: { [weak self] () -> MainViewController in
@@ -323,7 +315,7 @@ final class AuthorizedApplicationContext: NSObject, SplitViewDelegate {
         window.set(handler: { [weak self] () -> KeyHandlerResult in
             self?.openChat(2)
             return .invoked
-            }, with: self, for: .Three, priority: .low, modifierFlags: [.command])
+        }, with: self, for: .Three, priority: .low, modifierFlags: [.command])
         
         window.set(handler: { [weak self] () -> KeyHandlerResult in
             self?.openChat(3)
@@ -356,25 +348,79 @@ final class AuthorizedApplicationContext: NSObject, SplitViewDelegate {
         }, with: self, for: .Nine, priority: .low, modifierFlags: [.command])
         
         
+        
+        
         window.set(handler: { [weak self] () -> KeyHandlerResult in
-            self?.leftController.focusSearch(animated: true)
+            self?.openChat(0, true)
             return .invoked
-        }, with: self, for: .F, priority: .supreme, modifierFlags: [.command, .option])
+        }, with: self, for: .One, priority: .low, modifierFlags: [.command, .option])
         
-        
-        #if DEBUG
-        window.set(handler: {  () -> KeyHandlerResult in
-            showModal(with: LottieTestModalController(), for: window)
+        window.set(handler: { [weak self] () -> KeyHandlerResult in
+            self?.openChat(1, true)
             return .invoked
-        }, with: self, for: .T, priority: .supreme, modifierFlags: [.command])
-        #endif
+        }, with: self, for: .Two, priority: .low, modifierFlags: [.command, .option])
         
-       
+        window.set(handler: { [weak self] () -> KeyHandlerResult in
+            self?.openChat(2, true)
+            return .invoked
+        }, with: self, for: .Three, priority: .low, modifierFlags: [.command, .option])
+        
+        window.set(handler: { [weak self] () -> KeyHandlerResult in
+            self?.openChat(3, true)
+            return .invoked
+        }, with: self, for: .Four, priority: .low, modifierFlags: [.command, .option])
+        
+        window.set(handler: { [weak self] () -> KeyHandlerResult in
+            self?.openChat(4, true)
+            return .invoked
+        }, with: self, for: .Five, priority: .low, modifierFlags: [.command, .option])
+        
+        window.set(handler: { [weak self] () -> KeyHandlerResult in
+            self?.openChat(5, true)
+            return .invoked
+        }, with: self, for: .Six, priority: .low, modifierFlags: [.command, .option])
+        
+        window.set(handler: { [weak self] () -> KeyHandlerResult in
+            self?.openChat(6, true)
+            return .invoked
+        }, with: self, for: .Seven, priority: .low, modifierFlags: [.command, .option])
+        
+        window.set(handler: { [weak self] () -> KeyHandlerResult in
+            self?.openChat(7, true)
+            return .invoked
+        }, with: self, for: .Eight, priority: .low, modifierFlags: [.command, .option])
+        
+        window.set(handler: { [weak self] () -> KeyHandlerResult in
+            self?.openChat(8, true)
+            return .invoked
+        }, with: self, for: .Nine, priority: .low, modifierFlags: [.command, .option])
+        
+        window.set(handler: { [weak self] () -> KeyHandlerResult in
+            self?.openChat(9, true)
+            return .invoked
+        }, with: self, for: .Minus, priority: .low, modifierFlags: [.command, .option])
+        
+    
         
 //        window.set(handler: { [weak self] () -> KeyHandlerResult in
 //            self?.leftController.focusSearch(animated: true)
 //            return .invoked
-//        }, with: self, for: .E, priority: .low, modifierFlags: [.command])
+//        }, with: self, for: .F, priority: .supreme, modifierFlags: [.command, .shift])
+        
+        
+        
+        #if DEBUG
+        window.set(handler: { () -> KeyHandlerResult in
+            context.sharedContext.bindings.rootNavigation().push(GlobalSearchModalController(context: context))
+            return .invoked
+        }, with: self, for: .T, priority: .supreme, modifierFlags: .command)
+        #endif
+        
+        
+        appUpdateDisposable.set((context.account.stateManager.appUpdateInfo |> deliverOnMainQueue).start(next: { info in
+            
+        }))
+        
         
         suggestedLocalizationDisposable.set(( context.account.postbox.preferencesView(keys: [PreferencesKeys.suggestedLocalization]) |> mapToSignal { preferences -> Signal<SuggestedLocalizationInfo, NoError> in
             
@@ -430,6 +476,7 @@ final class AuthorizedApplicationContext: NSObject, SplitViewDelegate {
                 _ready.set(leftController.settings.ready.get())
                 leftController.tabController.select(index: leftController.settingsIndex)
             case let .chat(peerId, necessary):
+                
                 let peerSemaphore = DispatchSemaphore(value: 0)
                 var peer: Peer?
                 _ = context.account.postbox.transaction { transaction in
@@ -438,7 +485,7 @@ final class AuthorizedApplicationContext: NSObject, SplitViewDelegate {
                 }.start()
                 peerSemaphore.wait()
                 
-                if necessary || context.sharedContext.layout != .single {
+                if (necessary || context.sharedContext.layout != .single) && launchSettings.openAtLaunch {
                     if let peer = peer {
                         let controller = ChatController(context: context, chatLocation: .peer(peer.id))
                         controller.navigationController = self.rightController
@@ -483,10 +530,11 @@ final class AuthorizedApplicationContext: NSObject, SplitViewDelegate {
                 }
             })
         }
-        
-        
+            
        // _ready.set(.single(true))
     }
+    
+
     
     func runLaunchAction() {
         if let launchAction = launchAction {
@@ -506,20 +554,37 @@ final class AuthorizedApplicationContext: NSObject, SplitViewDelegate {
         }
     }
     
-    private func openChat(_ index: Int) {
-        leftController.openChat(index)
+    private func openChat(_ index: Int, _ force: Bool = false) {
+        leftController.openChat(index, force: force)
     }
     
-  
+    func splitResizeCursor(at point: NSPoint) -> NSCursor? {
+        if FastSettings.isMinimisize {
+            return NSCursor.resizeRight
+        } else {
+            if window.frame.width - point.x <= 380 {
+                return NSCursor.resizeLeft
+            }
+            return NSCursor.resizeLeftRight
+        }
+    }
 
-
+    func splitViewShouldResize(at point: NSPoint) {
+        if !FastSettings.isMinimisize {
+            let max_w = window.frame.width - 380
+            let result = round(min(max(point.x, 300), max_w))
+            FastSettings.updateLeftColumnWidth(result)
+            splitView.updateStartSize(size: NSMakeSize(result, result), controller: leftController)
+        }
+        
+    }
     
 
     
     func splitViewDidNeedSwapToLayout(state: SplitViewState) {
         let previousState = splitView.state
         splitView.removeAllControllers();
-        let w:CGFloat = 300;
+        let w:CGFloat = FastSettings.leftColumnWidth;
         FastSettings.isMinimisize = false
         splitView.mustMinimisize = false
         switch state {
@@ -592,7 +657,10 @@ final class AuthorizedApplicationContext: NSObject, SplitViewDelegate {
         someActionsDisposable.dispose()
         clearReadNotifiesDisposable.dispose()
         chatUndoManagerDisposable.dispose()
+        appUpdateDisposable.dispose()
+        updatesDisposable.dispose()
         context.cleanup()
+        NotificationCenter.default.removeObserver(self)
     }
     
 }

@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 
 class CallNavigationHeaderView: NavigationHeaderView {
     private let backgroundView = NSView()
@@ -140,11 +141,11 @@ class CallNavigationHeaderView: NavigationHeaderView {
             }
         }, for: .Click)
         
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
     }
     
     private var blueColor:NSColor {
-        return theme.colors.blueSelect
+        return theme.colors.accentSelect
     }
     private var grayColor:NSColor {
         return theme.colors.grayText
@@ -174,9 +175,9 @@ class CallNavigationHeaderView: NavigationHeaderView {
     }
     
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
-        
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         dropCall.set(image: theme.icons.callInlineDecline, for: .Normal)
         _ = dropCall.sizeToFit()
         endCall.set(text: tr(L10n.callHeaderEndCall), for: .Normal)

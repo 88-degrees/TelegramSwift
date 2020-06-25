@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 class ChatMediaLayoutParameters : Equatable {
     
@@ -19,6 +20,23 @@ class ChatMediaLayoutParameters : Equatable {
     
     let presentation: ChatMediaPresentation
     let media: Media
+    
+    
+    private var _timeCodeInitializer: Double? = nil
+
+    var timeCodeInitializer:Double? {
+        let current = self._timeCodeInitializer
+        self._timeCodeInitializer = nil
+        return current
+    }
+    
+    func remove_timeCodeInitializer() {
+        self._timeCodeInitializer = nil
+    }
+    
+    func set_timeCodeInitializer(_ timecode: Double?) {
+        self._timeCodeInitializer = timecode
+    }
     
     private var _automaticDownload: Bool
     
@@ -30,7 +48,7 @@ class ChatMediaLayoutParameters : Equatable {
         }
     }
     
-    private let autoplayMedia: AutoplayMediaPreferences
+    let autoplayMedia: AutoplayMediaPreferences
     
     var autoplay: Bool
     var soundOnHover: Bool {
@@ -249,6 +267,9 @@ class ChatMediaItem: ChatRowItem {
         if isForceRightLine {
             return rightSize.height
         }
+        if let file = self.media as? TelegramMediaFile, file.isEmojiAnimatedSticker {
+            return rightSize.height + 3
+        }
         if let caption = captionLayout {
             if let line = caption.lines.last, line.frame.width > realContentSize.width - (rightSize.width + insetBetweenContentAndDate) {
                 return rightSize.height
@@ -269,7 +290,7 @@ class ChatMediaItem: ChatRowItem {
                 return true
             }
             
-            return media.isVideo || media.isAnimated || media.isVoice || media.isMusic || media.isSticker
+            return media.isVideo || media.isAnimated || media.isVoice || media.isMusic || media.isStaticSticker || media.isAnimatedSticker
         }
         return super.isFixedRightPosition
     }
@@ -281,7 +302,7 @@ class ChatMediaItem: ChatRowItem {
     
     var positionFlags: LayoutPositionFlags? = nil
     
-    override init(_ initialSize:NSSize, _ chatInteraction:ChatInteraction, _ context: AccountContext, _ object: ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings) {
+    override init(_ initialSize:NSSize, _ chatInteraction:ChatInteraction, _ context: AccountContext, _ object: ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings, theme: TelegramPresentationTheme) {
         
         let message = object.message!
         
@@ -290,12 +311,32 @@ class ChatMediaItem: ChatRowItem {
         media = message.media[0]
         
         
-        super.init(initialSize, chatInteraction, context, object, downloadSettings)
+        super.init(initialSize, chatInteraction, context, object, downloadSettings, theme: theme)
         
         var canAddCaption: Bool = true
-        if let media = media as? TelegramMediaFile, media.isAnimatedSticker || media.isSticker {
+        if let media = media as? TelegramMediaFile, media.isAnimatedSticker || media.isStaticSticker {
             canAddCaption = false
         }
+        if media is TelegramMediaDice {
+            canAddCaption = false
+        }
+        
+        
+        self.parameters = ChatMediaGalleryParameters(showMedia: { [weak self] message in
+            guard let `self` = self else {return}
+            
+            var type:GalleryAppearType = .history
+            if let parameters = self.parameters as? ChatMediaGalleryParameters, parameters.isWebpage {
+                type = .alone
+            } else if message.containsSecretMedia {
+                type = .secret
+            }
+            showChatGallery(context: context, message: message, self.table, self.parameters as? ChatMediaGalleryParameters, type: type)
+            
+            }, showMessage: { [weak self] message in
+                self?.chatInteraction.focusMessageId(nil, message.id, .center(id: 0, innerId: nil, animated: true, focus: .init(focus: true), inset: 0))
+            }, isWebpage: chatInteraction.isLogInteraction, presentation: .make(for: message, account: context.account, renderType: object.renderType), media: media, automaticDownload: downloadSettings.isDownloable(message), autoplayMedia: object.autoplayMedia)
+        
         
         if !message.text.isEmpty, canAddCaption {
             
@@ -327,19 +368,35 @@ class ChatMediaItem: ChatRowItem {
                     break
                 }
             }
-            caption.detectLinks(type: types, context: context, color: theme.chat.linkColor(isIncoming, object.renderType == .bubble), openInfo:chatInteraction.openInfo, hashtag: context.sharedContext.bindings.globalSearch, command: chatInteraction.sendPlainText, applyProxy: chatInteraction.applyProxy)
-            if hasEntities {
-                caption = ChatMessageItem.applyMessageEntities(with: message.attributes, for: message.text.fixed, context: context, fontSize: theme.fontSize, openInfo:chatInteraction.openInfo, botCommand:chatInteraction.sendPlainText, hashtag: context.sharedContext.bindings.globalSearch, applyProxy: chatInteraction.applyProxy, textColor: theme.chat.textColor(isIncoming, object.renderType == .bubble), linkColor: theme.chat.linkColor(isIncoming, object.renderType == .bubble), monospacedPre: theme.chat.monospacedPreColor(isIncoming, entry.renderType == .bubble), monospacedCode: theme.chat.monospacedCodeColor(isIncoming, entry.renderType == .bubble)).mutableCopy() as! NSMutableAttributedString
+            var mediaDuration: Double? = nil
+            if let file = message.media.first as? TelegramMediaFile, file.isVideo && !file.isAnimated, let duration = file.duration {
+                mediaDuration = Double(duration)
+            }
+            
+            caption = ChatMessageItem.applyMessageEntities(with: message.attributes, for: message.text.fixed, context: context, fontSize: theme.fontSize, openInfo:chatInteraction.openInfo, botCommand:chatInteraction.sendPlainText, hashtag: context.sharedContext.bindings.globalSearch, applyProxy: chatInteraction.applyProxy, textColor: theme.chat.textColor(isIncoming, object.renderType == .bubble), linkColor: theme.chat.linkColor(isIncoming, object.renderType == .bubble), monospacedPre: theme.chat.monospacedPreColor(isIncoming, entry.renderType == .bubble), monospacedCode: theme.chat.monospacedCodeColor(isIncoming, entry.renderType == .bubble), mediaDuration: mediaDuration, timecode: { [weak self] timecode in
+                self?.parameters?.set_timeCodeInitializer(timecode)
+                self?.parameters?.showMedia(message)
+            }, openBank: chatInteraction.openBank).mutableCopy() as! NSMutableAttributedString
+            
+            
+            if !hasEntities || message.flags.contains(.Failed) || message.flags.contains(.Unsent) || message.flags.contains(.Sending) {
+                caption.detectLinks(type: types, context: context, color: theme.chat.linkColor(isIncoming, object.renderType == .bubble), openInfo:chatInteraction.openInfo, hashtag: context.sharedContext.bindings.globalSearch, command: chatInteraction.sendPlainText, applyProxy: chatInteraction.applyProxy)
             }
             captionLayout = TextViewLayout(caption, alignment: .left, selectText: theme.chat.selectText(isIncoming, object.renderType == .bubble), strokeLinks: object.renderType == .bubble, alwaysStaticItems: true, disableTooltips: false)
             
-            captionLayout?.interactions = globalLinkExecutor
+            let interactions = globalLinkExecutor
+            
+            interactions.copyToClipboard = { text in
+                copyToClipboard(text)
+                context.sharedContext.bindings.rootNavigation().controller.show(toaster: ControllerToaster(text: L10n.shareLinkCopied))
+            }
+            captionLayout?.interactions = interactions
             
             if let textLayout = self.captionLayout {
-                if let highlightFoundText = entry.additionalData?.highlightFoundText {
+                if let highlightFoundText = entry.additionalData.highlightFoundText {
                     if highlightFoundText.isMessage {
                         if let range = rangeOfSearch(highlightFoundText.query, in: caption.string) {
-                            textLayout.additionalSelections = [TextSelectedRange(range: range, color: theme.colors.blueIcon.withAlphaComponent(0.5), def: false)]
+                            textLayout.additionalSelections = [TextSelectedRange(range: range, color: theme.colors.accentIcon.withAlphaComponent(0.5), def: false)]
                         }
                     } else {
                         var additionalSelections:[TextSelectedRange] = []
@@ -365,21 +422,7 @@ class ChatMediaItem: ChatRowItem {
         }
         
         
-        self.parameters = ChatMediaGalleryParameters(showMedia: { [weak self] message in
-            guard let `self` = self else {return}
-            
-            var type:GalleryAppearType = .history
-            if let parameters = self.parameters as? ChatMediaGalleryParameters, parameters.isWebpage {
-                type = .alone
-            } else if message.containsSecretMedia {
-                type = .secret
-            }
-            showChatGallery(context: context, message: message, self.table, self.parameters as? ChatMediaGalleryParameters, type: type)
-            
-        }, showMessage: { [weak self] message in
-            self?.chatInteraction.focusMessageId(nil, message.id, .center(id: 0, innerId: nil, animated: true, focus: true, inset: 0))
-        }, isWebpage: chatInteraction.isLogInteraction, presentation: .make(for: message, account: context.account, renderType: object.renderType), media: media, automaticDownload: downloadSettings.isDownloable(message), autoplayMedia: object.autoplayMedia)
-        
+
         
         if isBubbleFullFilled  {
             var positionFlags: LayoutPositionFlags = []
@@ -458,10 +501,13 @@ class ChatMediaItem: ChatRowItem {
     }
     
     override var identifier: String {
-        return super.identifier + "\(stableId)"
+        return super.identifier
     }
    
     public func contentNode() -> ChatMediaContentView.Type {
+        if let file = media as? TelegramMediaFile, message?.id.peerId.namespace == Namespaces.Peer.SecretChat, file.isAnimatedSticker, file.stickerReference == nil {
+            return ChatFileContentView.self
+        }
         return ChatLayoutUtils.contentNode(for: media)
     }
     
@@ -477,31 +523,36 @@ class ChatMediaView: ChatRowView, ModalPreviewRowViewProtocol {
     
     
     
-    func fileAtPoint(_ point: NSPoint) -> QuickPreviewMedia? {
+    func fileAtPoint(_ point: NSPoint) -> (QuickPreviewMedia, NSView?)? {
         if let contentNode = contentNode {
             if contentNode is ChatStickerContentView {
                 if let file = contentNode.media as? TelegramMediaFile {
                     let reference = contentNode.parent != nil ? FileMediaReference.message(message: MessageReference(contentNode.parent!), media: file) : FileMediaReference.standalone(media: file)
-                    return .file(reference, StickerPreviewModalView.self)
+                    return (.file(reference, StickerPreviewModalView.self), contentNode)
                 }
             } else if contentNode is ChatGIFContentView {
                 if let file = contentNode.media as? TelegramMediaFile {
                     let reference = contentNode.parent != nil ? FileMediaReference.message(message: MessageReference(contentNode.parent!), media: file) : FileMediaReference.standalone(media: file)
-                    return .file(reference, GifPreviewModalView.self)
+                    return (.file(reference, GifPreviewModalView.self), contentNode)
                 }
             } else if contentNode is ChatInteractiveContentView {
                 if let image = contentNode.media as? TelegramMediaImage {
                     let reference = contentNode.parent != nil ? ImageMediaReference.message(message: MessageReference(contentNode.parent!), media: image) : ImageMediaReference.standalone(media: image)
-                    return .image(reference, ImagePreviewModalView.self)
+                    return (.image(reference, ImagePreviewModalView.self), contentNode)
                 }
             } else if contentNode is ChatFileContentView {
                 if let file = contentNode.media as? TelegramMediaFile, file.isGraphicFile, let mediaId = file.id, let dimension = file.dimensions {
                     var representations: [TelegramMediaImageRepresentation] = []
                     representations.append(contentsOf: file.previewRepresentations)
                     representations.append(TelegramMediaImageRepresentation(dimensions: dimension, resource: file.resource))
-                    let image = TelegramMediaImage(imageId: mediaId, representations: representations, immediateThumbnailData: file.immediateThumbnailData, reference: nil, partialReference: file.partialReference)
+                    let image = TelegramMediaImage(imageId: mediaId, representations: representations, immediateThumbnailData: file.immediateThumbnailData, reference: nil, partialReference: file.partialReference, flags: [])
                     let reference = contentNode.parent != nil ? ImageMediaReference.message(message: MessageReference(contentNode.parent!), media: image) : ImageMediaReference.standalone(media: image)
-                    return .image(reference, ImagePreviewModalView.self)
+                    return (.image(reference, ImagePreviewModalView.self), contentNode)
+                }
+            } else if contentNode is MediaAnimatedStickerView {
+                if let file = contentNode.media as? TelegramMediaFile {
+                    let reference = contentNode.parent != nil ? FileMediaReference.message(message: MessageReference(contentNode.parent!), media: file) : FileMediaReference.standalone(media: file)
+                    return (.file(reference, AnimatedStickerPreviewModalView.self), contentNode)
                 }
             }
         }

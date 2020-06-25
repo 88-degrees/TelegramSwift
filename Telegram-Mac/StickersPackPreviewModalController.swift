@@ -17,11 +17,11 @@ import MtProtoKitMac
 
 final class StickerPackArguments {
     let context: AccountContext
-    let send:(TelegramMediaFile)->Void
+    let send:(TelegramMediaFile, NSView)->Void
     let addpack:(StickerPackCollectionInfo, [ItemCollectionItem], Bool)->Void
     let share:(String)->Void
     let close:()->Void
-    init(context: AccountContext, send:@escaping(Media)->Void, addpack:@escaping(StickerPackCollectionInfo, [ItemCollectionItem], Bool)->Void, share:@escaping(String)->Void, close:@escaping()->Void) {
+    init(context: AccountContext, send:@escaping(Media, NSView)->Void, addpack:@escaping(StickerPackCollectionInfo, [ItemCollectionItem], Bool)->Void, share:@escaping(String)->Void, close:@escaping()->Void) {
         self.context = context
         self.send = send
         self.addpack = addpack
@@ -64,12 +64,12 @@ private class StickersModalView : View {
         add.setFrameSize(170, 40)
         add.layer?.cornerRadius = 20
         
-        add.set(color: .white, for: .Normal)
+        add.set(color: theme.colors.underSelectedColor, for: .Normal)
         add.set(font: .medium(.title), for: .Normal)
-        add.set(background: theme.colors.blueFill, for: .Normal)
-        add.set(background: theme.colors.blueFill, for: .Hover)
-        add.set(background: theme.colors.blueFill, for: .Highlight)
-        add.set(text: tr(L10n.stickerPackAdd1Countable(0)), for: .Normal)
+        add.set(background: theme.colors.accent, for: .Normal)
+        add.set(background: theme.colors.accent, for: .Hover)
+        add.set(background: theme.colors.accent, for: .Highlight)
+        add.set(text: L10n.stickerPackAdd1Countable(0), for: .Normal)
 
         addSubview(add)
         headerTitle.backgroundColor = theme.colors.background
@@ -111,7 +111,7 @@ private class StickersModalView : View {
             let attr = NSMutableAttributedString()
             
             _ = attr.append(string: info.title, color: theme.colors.text, font: .medium(16.0))
-            attr.detectLinks(type: [.Mentions], context: arguments.context, color: .blueUI, openInfo: { (peerId, _, _, _) in
+            attr.detectLinks(type: [.Mentions], context: arguments.context, color: .accent, openInfo: { (peerId, _, _, _) in
                 _ = (arguments.context.account.postbox.loadedPeerWithId(peerId) |> deliverOnMainQueue).start(next: { peer in
                     arguments.close()
                     if peer.isUser || peer.isBot {
@@ -142,7 +142,7 @@ private class StickersModalView : View {
             
             grid.removeAllItems()
             
-            grid.transaction(GridNodeTransaction(deleteItems: [], insertItems: insert, updateItems: [], scrollToItem: nil, updateLayout: GridNodeUpdateLayout(layout: GridNodeLayout(size: CGSize(width: frame.width, height: frame.height), insets: NSEdgeInsets(left: 0, right: 0, top: 10, bottom: installed ? 0 : 60), preloadSize: self.bounds.width, type: .fixed(itemSize: CGSize(width: 80, height: 80), lineSpacing: 10)), transition: .immediate), itemTransition: .immediate, stationaryItems: .all, updateFirstIndexInSectionOffset: nil), completion: { _ in })
+            grid.transaction(GridNodeTransaction(deleteItems: [], insertItems: insert, updateItems: [], scrollToItem: nil, updateLayout: GridNodeUpdateLayout(layout: GridNodeLayout(size: CGSize(width: frame.width, height: frame.height), insets: NSEdgeInsets(left: 0, right: 0, top: 10, bottom: installed ? 0 : 60), preloadSize: self.bounds.width, type: .fixed(itemSize: CGSize(width: 70, height: 70), lineSpacing: 10)), transition: .immediate), itemTransition: .immediate, stationaryItems: .all, updateFirstIndexInSectionOffset: nil), completion: { _ in })
             
             grid.layer?.animateAlpha(from: 0, to: 1, duration: 0.2)
             self.needsLayout = true
@@ -185,12 +185,12 @@ private class StickersModalView : View {
         
         grid.frame = NSMakeRect(0, headerHeight, frame.width, frame.height - headerHeight)
         
-        headerTitle.centerX(y : floorToScreenPixels(scaleFactor: backingScaleFactor, (headerHeight - headerTitle.frame.height)/2) + 1)
+        headerTitle.centerX(y : floorToScreenPixels(backingScaleFactor, (headerHeight - headerTitle.frame.height)/2) + 1)
         headerSeparatorView.frame = NSMakeRect(0, headerHeight - .borderSize, frame.width, .borderSize)
-        shareView.setFrameOrigin(frame.width - close.frame.width - 12, floorToScreenPixels(scaleFactor: backingScaleFactor, (headerHeight - shareView.frame.height)/2))
-        close.setFrameOrigin(12, floorToScreenPixels(scaleFactor: backingScaleFactor, (headerHeight - shareView.frame.height)/2))
+        shareView.setFrameOrigin(frame.width - close.frame.width - 12, floorToScreenPixels(backingScaleFactor, (headerHeight - shareView.frame.height)/2))
+        close.setFrameOrigin(12, floorToScreenPixels(backingScaleFactor, (headerHeight - shareView.frame.height)/2))
         add.centerX(y: frame.height - add.frame.height - 15)
-        dismiss.setFrameOrigin(NSMakePoint(shareView.frame.minX - dismiss.frame.width - 15, floorToScreenPixels(scaleFactor: backingScaleFactor, (headerHeight - shareView.frame.height)/2)))
+        dismiss.setFrameOrigin(NSMakePoint(shareView.frame.minX - dismiss.frame.width - 15, floorToScreenPixels(backingScaleFactor, (headerHeight - shareView.frame.height)/2)))
         
         shadowView.setFrameOrigin(0, frame.height - shadowView.frame.height)
     }
@@ -198,7 +198,7 @@ private class StickersModalView : View {
 
 
 
-class StickersPackPreviewModalController: ModalViewController {
+class StickerPackPreviewModalController: ModalViewController {
     private let context:AccountContext
     private let peerId:PeerId?
     private let reference:StickerPackReference
@@ -209,33 +209,17 @@ class StickersPackPreviewModalController: ModalViewController {
         self.context = context
         self.peerId = peerId
         self.reference = reference
-        super.init(frame: NSMakeRect(0, 0, 360, 400))
+        super.init(frame: NSMakeRect(0, 0, 350, 400))
         bar = .init(height: 0)
-        arguments = StickerPackArguments(context: context, send: { [weak self] media in
-            self?.close()
-            if let peerId = peerId, let strongSelf = self {
-                
-                var attributes:[MessageAttribute] = []
-                if FastSettings.isChannelMessagesMuted(peerId) {
-                    attributes.append(NotificationInfoMessageAttribute(flags: [.muted]))
-                }
-                
-                let interactions = (context.sharedContext.bindings.rootNavigation().controller as? ChatController)?.chatInteraction
-                
-                if let interactions = interactions, interactions.peerId == peerId, let media = media as? TelegramMediaFile {
-                    interactions.sendAppFile(media)
+        arguments = StickerPackArguments(context: context, send: { [weak self] media, view in
+            let interactions = (context.sharedContext.bindings.rootNavigation().controller as? ChatController)?.chatInteraction
+            
+            if let interactions = interactions, let media = media as? TelegramMediaFile, media.maskData == nil {
+                if let slowMode = interactions.presentation.slowMode, slowMode.hasLocked {
+                    showSlowModeTimeoutTooltip(slowMode, for: view)
                 } else {
-                    _ = (strongSelf.context.account.postbox.loadedPeerWithId(peerId) |> filter { $0.canSendMessage && permissionText(from: $0, for: .banSendStickers) == nil } |> mapToSignal { _ -> Signal<[MessageId?], NoError> in
-                        let enqueue = EnqueueMessage.message(text: "", attributes: attributes, mediaReference: AnyMediaReference.stickerPack(stickerPack: reference, media: media), replyToMessageId: nil, localGroupingKey: nil)
-                        let value = enqueueMessages(context: context, peerId: peerId, messages: [enqueue])
-                        return value
-                    }) .start()
-                }
-            } else {
-                let interactions = (context.sharedContext.bindings.rootNavigation().controller as? ChatController)?.chatInteraction
-                
-                if let interactions = interactions, let media = media as? TelegramMediaFile {
                     interactions.sendAppFile(media)
+                    self?.close()
                 }
             }
         }, addpack: { [weak self] info, items, installed in
@@ -286,6 +270,10 @@ class StickersPackPreviewModalController: ModalViewController {
 
         }))
 
+    }
+    
+    override func becomeFirstResponder() -> Bool? {
+        return false
     }
     
     deinit {

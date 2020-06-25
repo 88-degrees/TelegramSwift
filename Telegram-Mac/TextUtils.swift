@@ -7,9 +7,11 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 import TGUIKit
+import SwiftSignalKit
 
 func pullText(from message:Message, attachEmoji: Bool = true) -> NSString {
     var messageText: NSString = message.text.fixed.nsstring
@@ -25,10 +27,11 @@ func pullText(from message:Message, attachEmoji: Bool = true) -> NSString {
                     messageText = ((attachEmoji ? "🖼 " : "") + message.text.fixed).nsstring
                 }
             }
-            
+        case _ as TelegramMediaDice:
+            messageText = "🎲".nsstring
         case let fileMedia as TelegramMediaFile:
-            if fileMedia.isSticker {
-                messageText = tr(L10n.chatListSticker(fileMedia.stickerText?.fixed ?? "")).nsstring
+            if fileMedia.isStaticSticker || fileMedia.isAnimatedSticker {
+                messageText = L10n.chatListSticker(fileMedia.stickerText?.fixed ?? "").nsstring
             } else if fileMedia.isVoice {
                 messageText = tr(L10n.chatListVoice).nsstring
             } else if fileMedia.isMusic  {
@@ -78,13 +81,13 @@ func pullText(from message:Message, attachEmoji: Bool = true) -> NSString {
     
 }
 
-func chatListText(account:Account, for message:Message?, renderedPeer:RenderedPeer? = nil, embeddedState:PeerChatListEmbeddedInterfaceState? = nil, folder: Bool = false) -> NSAttributedString {
+func chatListText(account:Account, for message:Message?, renderedPeer:RenderedPeer? = nil, embeddedState:PeerChatListEmbeddedInterfaceState? = nil, folder: Bool = false, maxWidth: CGFloat? = nil) -> NSAttributedString {
     
     if let embeddedState = embeddedState as? ChatEmbeddedInterfaceState {
         let mutableAttributedText = NSMutableAttributedString()
         _ = mutableAttributedText.append(string: L10n.chatListDraft, color: theme.colors.redUI, font: .normal(.text))
-        _ = mutableAttributedText.append(string: " \(embeddedState.text)", color: theme.chatList.grayTextColor, font: .normal(.text))
-        mutableAttributedText.setSelected(color: .white, range: mutableAttributedText.range)
+        _ = mutableAttributedText.append(string: " \(embeddedState.text.fullTrimmed.replacingOccurrences(of: "\n", with: " "))", color: theme.chatList.grayTextColor, font: .normal(.text))
+        mutableAttributedText.setSelected(color: theme.colors.underSelectedColor, range: mutableAttributedText.range)
         return mutableAttributedText
     }
     
@@ -98,7 +101,7 @@ func chatListText(account:Account, for message:Message?, renderedPeer:RenderedPe
             _ = subAttr.append(string: L10n.chatListSecretChatExKeys, color: theme.chatList.grayTextColor, font: .normal(.text))
             case .active:
                 if message == nil {
-                    let title:String = renderedPeer.chatMainPeer?.compactDisplayTitle ?? L10n.peerDeletedUser
+                    let title:String = renderedPeer.chatMainPeer?.displayTitle ?? L10n.peerDeletedUser
                     switch peer.role {
                     case .creator:
                         _ = subAttr.append(string: L10n.chatListSecretChatJoined(title), color: theme.chatList.grayTextColor, font: .normal(.text))
@@ -108,7 +111,7 @@ func chatListText(account:Account, for message:Message?, renderedPeer:RenderedPe
                     
                 }
             }
-            subAttr.setSelected(color: .white, range: subAttr.range)
+            subAttr.setSelected(color: theme.colors.underSelectedColor, range: subAttr.range)
             if subAttr.length > 0 {
                 return subAttr
             }
@@ -120,7 +123,7 @@ func chatListText(account:Account, for message:Message?, renderedPeer:RenderedPe
         if message.text.isEmpty && message.media.isEmpty {
             let attr = NSMutableAttributedString()
             _ = attr.append(string: L10n.chatListUnsupportedMessage, color: theme.chatList.grayTextColor, font: .normal(.text))
-            attr.setSelected(color: .white, range: attr.range)
+            attr.setSelected(color: theme.colors.underSelectedColor, range: attr.range)
             return attr
         }
         
@@ -136,17 +139,27 @@ func chatListText(account:Account, for message:Message?, renderedPeer:RenderedPe
             }
             
             if let author = message.author as? TelegramUser, let peer = peer, peer as? TelegramUser == nil, !peer.isChannel {
-                let peerText: NSString = (author.id == account.peerId ? "\(L10n.chatListYou)" + (folder ? ": " : "\n") : author.compactDisplayTitle + (folder ? ": " : "\n")) as NSString
+                var peerText: String = (author.id == account.peerId ? "\(L10n.chatListYou)" : author.displayTitle)
                 
-                _ = attributedText.append(string: peerText as String, color: theme.chatList.peerTextColor, font: .normal(.text))
+                let layout = TextViewLayout(.initialize(string: peerText, color: nil, font: .normal(.text)))
+                layout.measure(width: maxWidth ?? .greatestFiniteMagnitude)
+                if let line = layout.lines.first, layout.lines.count > 1 {
+                    peerText = peerText.nsstring.substring(with: line.range) + "..."
+                }
+                
+                peerText += (folder ? ": " : "\n")
+                
+                
+                    
+                _ = attributedText.append(string: peerText, color: theme.chatList.peerTextColor, font: .normal(.text))
                 _ = attributedText.append(string: messageText as String, color: theme.chatList.grayTextColor, font: .normal(.text))
             } else {
                 _ = attributedText.append(string: messageText as String, color: theme.chatList.grayTextColor, font: .normal(.text))
             }
-            attributedText.setSelected(color: .white,range: attributedText.range)
+            attributedText.setSelected(color: theme.colors.underSelectedColor, range: attributedText.range)
         } else if message.media.first is TelegramMediaAction {
             _ = attributedText.append(string: serviceMessageText(message, account:account), color: theme.chatList.grayTextColor, font: .normal(.text))
-            attributedText.setSelected(color: .white,range: attributedText.range)
+            attributedText.setSelected(color: theme.colors.underSelectedColor, range: attributedText.range)
         } else if let media = message.media.first as? TelegramMediaExpiredContent {
             let text:String
             switch media.data {
@@ -156,15 +169,16 @@ func chatListText(account:Account, for message:Message?, renderedPeer:RenderedPe
                 text = L10n.serviceMessageExpiredVideo
             }
             _ = attributedText.append(string: text, color: theme.chatList.grayTextColor, font: .normal(.text))
-            attributedText.setSelected(color: .white,range: attributedText.range)
+            attributedText.setSelected(color: theme.colors.underSelectedColor,range: attributedText.range)
         }
+        
         return attributedText
 
     }
     return NSAttributedString()
 }
 
-func serviceMessageText(_ message:Message, account:Account) -> String {
+func serviceMessageText(_ message:Message, account:Account, isReplied: Bool = false) -> String {
     
     var authorName:String = ""
     if let displayTitle = message.author?.displayTitle {
@@ -230,21 +244,26 @@ func serviceMessageText(_ message:Message, account:Account) -> String {
                 return peer.isChannel ? L10n.chatServiceChannelRemovedPhoto : L10n.chatServiceGroupRemovedPhoto(authorName)
             }
         case .pinnedMessageUpdated:
-            var authorName:String = ""
-            if let displayTitle = message.author?.displayTitle {
-                authorName = displayTitle
-                if account.peerId == message.author?.id {
-                    authorName = tr(L10n.chatServiceYou)
+            if !isReplied {
+                var authorName:String = ""
+                if let displayTitle = message.author?.displayTitle {
+                    authorName = displayTitle
+                    if account.peerId == message.author?.id {
+                        authorName = tr(L10n.chatServiceYou)
+                    }
                 }
+                
+                var replyMessageText = ""
+                for attribute in message.attributes {
+                    if let attribute = attribute as? ReplyMessageAttribute, let message = message.associatedMessages[attribute.messageId] {
+                        replyMessageText = pullText(from: message) as String
+                    }
+                }
+                return L10n.chatServiceGroupUpdatedPinnedMessage(authorName, replyMessageText.prefixWithDots(15))
+            } else {
+                return L10n.chatServicePinnedMessage
             }
             
-            var replyMessageText = ""
-            for attribute in message.attributes {
-                if let attribute = attribute as? ReplyMessageAttribute, let message = message.associatedMessages[attribute.messageId] {
-                    replyMessageText = pullText(from: message) as String
-                }
-            }
-            return L10n.chatServiceGroupUpdatedPinnedMessage(authorName, replyMessageText.prefixWithDots(15))
         case let .removedMembers(peerIds: peerIds):
             if peerIds.first == authorId {
                 return L10n.chatServiceGroupRemovedSelf(authorName)
@@ -320,7 +339,7 @@ struct PeerStatusStringTheme {
     let statusColor:NSColor
     let highlightColor:NSColor
     let highlightIfActivity:Bool
-    init(titleFont:NSFont = .normal(.title), titleColor:NSColor = theme.colors.text, statusFont:NSFont = .normal(.short), statusColor:NSColor = theme.colors.grayText, highlightColor:NSColor = theme.colors.blueUI, highlightIfActivity:Bool = true) {
+    init(titleFont:NSFont = .normal(.title), titleColor:NSColor = theme.colors.text, statusFont:NSFont = .normal(.short), statusColor:NSColor = theme.colors.grayText, highlightColor:NSColor = theme.colors.accent, highlightIfActivity:Bool = true) {
         self.titleFont = titleFont
         self.titleColor = titleColor
         self.statusFont = statusFont
@@ -344,6 +363,12 @@ struct PeerStatusStringResult : Equatable {
         let title = self.title.mutableCopy() as! NSMutableAttributedString
         title.replaceCharacters(in: title.range, with: string)
         return PeerStatusStringResult(title, self.status, presence: presence)
+    }
+    
+    func withUpdatedStatus(_ status: String) -> PeerStatusStringResult {
+        let status = self.status.mutableCopy() as! NSMutableAttributedString
+        status.replaceCharacters(in: status.range, with: status)
+        return PeerStatusStringResult(self.title, status, presence: presence)
     }
 }
 
@@ -370,7 +395,9 @@ func stringStatus(for peerView:PeerView, context: AccountContext, theme:PeerStat
             if user.phone == "42777" || user.phone == "42470" || user.phone == "4240004" {
                 return PeerStatusStringResult(title, .initialize(string: L10n.peerServiceNotifications,  color: theme.statusColor, font: theme.statusFont))
             }
-            if let _ = user.botInfo {
+            if user.flags.contains(.isSupport) {
+                return PeerStatusStringResult(title, .initialize(string: L10n.presenceSupport,  color: theme.statusColor, font: theme.statusFont))
+            } else if let _ = user.botInfo {
                 return PeerStatusStringResult(title, .initialize(string: L10n.presenceBot,  color: theme.statusColor, font: theme.statusFont))
             } else if let presence = peerView.peerPresences[peer.id] as? TelegramUserPresence {
                 let timestamp = CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970
@@ -463,6 +490,40 @@ func stringStatus(for peerView:PeerView, context: AccountContext, theme:PeerStat
         localized = tr(L10n.timerWeeksCountable(ttl / 60 / 60 / 24 / 7))
     }
     return localized
+}
+
+func slowModeTooltipText(_ timeout: Int32) -> String {
+    let minutes = timeout / 60
+    let seconds = timeout % 60
+    return L10n.channelSlowModeToolTip(minutes < 10 ? "0\(minutes)" : "\(minutes)", seconds < 10 ? "0\(seconds)" : "\(seconds)")
+}
+func showSlowModeTimeoutTooltip(_ slowMode: SlowMode, for view: NSView) {
+    if let errorText = slowMode.errorText {
+        if let validUntil = slowMode.validUntil {
+            tooltip(for: view, text: errorText, updateText: { f in
+                var timer:SwiftSignalKit.Timer?
+                timer = SwiftSignalKit.Timer(timeout: 0.1, repeat: true, completion: {
+                    
+                    let timeout = (validUntil - Int32(Date().timeIntervalSince1970))
+                    
+                    var result: Bool = false
+                    if timeout > 0 {
+                        result = f(slowModeTooltipText(timeout))
+                    }
+                    if !result {
+                        timer?.invalidate()
+                        timer = nil
+                    }
+                    
+                }, queue: .mainQueue())
+                
+                timer?.start()
+            })
+        } else {
+            tooltip(for: view, text: errorText)
+        }
+        
+    }
 }
 
 let preCharacter = "`"

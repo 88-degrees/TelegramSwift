@@ -8,7 +8,7 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 enum GeneralInputRowType {
     case plain
@@ -83,7 +83,7 @@ class GeneralInputRowItem: TableRowItem {
     var _height:CGFloat = 24
     
     override var height: CGFloat {
-        return _height + insets.top + insets.bottom
+        return _height + insets.top + insets.bottom + 5
     }
     
 
@@ -167,7 +167,7 @@ class GeneralInputRowView: TableRowView,TGModernGrowingDelegate, NSTextFieldDele
             textView.frame = NSMakeRect(item.insets.left, item.insets.top, frame.width - item.insets.left - item.insets.right,textView.frame.height)
             secureField.frame = NSMakeRect(item.insets.left, item.insets.top, frame.width - item.insets.left - item.insets.right, secureField.frame.height)
             cleanImage.centerY(x: frame.width - item.insets.right - cleanImage.frame.width)
-            separator.frame = NSMakeRect(item.insets.left, frame.height - .borderSize, frame.width - item.insets.left - item.insets.right, .borderSize)
+            separator.frame = NSMakeRect(item.insets.left + 2, frame.height - .borderSize, frame.width - item.insets.left - item.insets.right, .borderSize)
         }
     }
     
@@ -180,13 +180,18 @@ class GeneralInputRowView: TableRowView,TGModernGrowingDelegate, NSTextFieldDele
         _ = becomeFirstResponder()
     }
     
+    override func updateColors() {
+        super.updateColors()
+        textView.setBackgroundColor(theme.colors.background)
+        separator.backgroundColor = theme.colors.border
+    }
+    
     override func set(item: TableRowItem, animated: Bool) {
         super.set(item: item, animated:animated)
         textView.animates = false
         
         if let item = item as? GeneralInputRowItem {
             
-            separator.backgroundColor = theme.colors.border
 
             
             cleanImage.set(image: theme.icons.recentDismiss, for: .Normal)
@@ -303,6 +308,10 @@ class GeneralInputRowView: TableRowView,TGModernGrowingDelegate, NSTextFieldDele
     
     func textViewTextDidChangeSelectedRange(_ range: NSRange) {
         
+    }
+    
+    func textViewDidReachedLimit(_ textView: Any) {
+        self.textView.shake()
     }
     
     func textViewDidPaste(_ pasteboard: NSPasteboard) -> Bool {

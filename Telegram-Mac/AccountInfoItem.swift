@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 
 
@@ -33,7 +34,7 @@ class AccountInfoItem: GeneralRowItem {
             _ = attr.append(string: "\n")
             _ = attr.append(string: formatPhoneNumber(phone), color: theme.colors.grayText, font: .normal(.text))
         }
-        if let username = peer.username {
+        if let username = peer.username, !username.isEmpty {
             _ = attr.append(string: "\n")
             _ = attr.append(string: "@\(username)", color: theme.colors.grayText, font: .normal(.text))
         }
@@ -41,7 +42,7 @@ class AccountInfoItem: GeneralRowItem {
         textLayout = TextViewLayout(attr, maximumNumberOfLines: 4)
         
         let active = attr.mutableCopy() as! NSMutableAttributedString
-        active.addAttribute(.foregroundColor, value: NSColor.white, range: active.range)
+        active.addAttribute(.foregroundColor, value: theme.colors.underSelectedColor, range: active.range)
         activeTextlayout = TextViewLayout(active, maximumNumberOfLines: 4)
         super.init(initialSize, height: 90, stableId: stableId, action: action)
     }
@@ -95,7 +96,7 @@ class AccountInfoView : TableRowView {
     }
     
     override var backdorColor: NSColor {
-        return isSelect ? theme.colors.blueSelect : theme.colors.background
+        return isSelect ? theme.colors.accentSelect : theme.colors.background
     }
     
 

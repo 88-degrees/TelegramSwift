@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
+import Postbox
+import TelegramCore
+import SyncCore
 
 final class ChatMediaMapLayoutParameters : ChatMediaLayoutParameters {
     let map:TelegramMediaMap
@@ -27,8 +28,8 @@ final class ChatMediaMapLayoutParameters : ChatMediaLayoutParameters {
         self.resource = resource
         self.defaultImageSize = isVenue ? NSMakeSize(60, 60) : NSMakeSize(320, 120)
         self.url = "https://maps.google.com/maps?q=\(String(format:"%f", map.latitude)),\(String(format:"%f", map.longitude))"
-        let representation = TelegramMediaImageRepresentation(dimensions: defaultImageSize, resource: resource)
-        self.image = TelegramMediaImage(imageId: map.id ?? MediaId(namespace: 0, id: arc4random64()), representations: [representation], immediateThumbnailData: nil, reference: nil, partialReference: nil)
+        let representation = TelegramMediaImageRepresentation(dimensions: PixelDimensions(defaultImageSize), resource: resource)
+        self.image = TelegramMediaImage(imageId: map.id ?? MediaId(namespace: 0, id: arc4random64()), representations: [representation], immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
         
         self.arguments = TransformImageArguments(corners: ImageCorners(radius: 8), imageSize: defaultImageSize, boundingSize: defaultImageSize, intrinsicInsets: NSEdgeInsets())
         if let venue = map.venue {
@@ -51,8 +52,8 @@ func ==(lhs:ChatMediaMapLayoutParameters, rhs:ChatMediaMapLayoutParameters) -> B
 class ChatMapRowItem: ChatMediaItem {
     fileprivate var liveText: TextViewLayout?
     fileprivate var updatedText: TextViewLayout?
-    override init(_ initialSize: NSSize, _ chatInteraction: ChatInteraction, _ context: AccountContext, _ object: ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings) {
-        super.init(initialSize, chatInteraction, context, object, downloadSettings)
+    override init(_ initialSize: NSSize, _ chatInteraction: ChatInteraction, _ context: AccountContext, _ object: ChatHistoryEntry, _ downloadSettings: AutomaticMediaDownloadSettings, theme: TelegramPresentationTheme) {
+        super.init(initialSize, chatInteraction, context, object, downloadSettings, theme: theme)
         let map = media as! TelegramMediaMap
       //  let isVenue = map.venue != nil
         let resource =  MapSnapshotMediaResource(latitude: map.latitude, longitude: map.longitude, width: 320 * 2, height: 120 * 2, zoom: 15)

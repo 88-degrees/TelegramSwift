@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 
 final class ThemeGridControllerInteraction {
@@ -128,23 +129,21 @@ class ChatWallpaperModalController: ModalViewController {
                             if CGImageDestinationFinalize(colorDestination) {
                                 let thumdResource = LocalFileMediaResource(fileId: arc4random64())
                                 context.account.postbox.mediaBox.storeResourceData(thumdResource.id, data: mutableData as Data)
-                                representations.append(TelegramMediaImageRepresentation(dimensions: image.size.aspectFitted(NSMakeSize(90, 90)), resource: thumdResource))
+                                representations.append(TelegramMediaImageRepresentation(dimensions: PixelDimensions(image.size.aspectFitted(NSMakeSize(90, 90))), resource: thumdResource))
                             }
                         }
                         
                         let resource = LocalFileReferenceMediaResource(localFilePath: path, randomId: arc4random64())
-                        representations.append(TelegramMediaImageRepresentation(dimensions: image.size, resource: resource))
+                        representations.append(TelegramMediaImageRepresentation(dimensions: PixelDimensions(image.size), resource: resource))
                         
-                        showModal(with: WallpaperPreviewController(context, wallpaper: .image(representations, settings: WallpaperSettings()), source: .none), for: mainWindow)
+                        showModal(with: WallpaperPreviewController(context, wallpaper: .image(representations, settings: WallpaperSettings()), source: .none), for: context.window)
                         
                     } else {
-                        alert(for: mainWindow, header: appName, info: L10n.appearanceCustomBackgroundFileError)
+                        alert(for: context.window, header: appName, info: L10n.appearanceCustomBackgroundFileError)
                     }
                 }
             })
-        }, cancelTitle: L10n.modalCancel, cancel: { [weak self] in
-            self?.close()
-        }, drawBorder: true, height: 50, alignCancelLeft: true)
+        }, drawBorder: true, height: 50, singleButton: true)
        
         return interactions
     }
@@ -153,7 +152,9 @@ class ChatWallpaperModalController: ModalViewController {
         return true
     }
     public override var modalHeader: (left: ModalHeaderData?, center: ModalHeaderData?, right: ModalHeaderData?)? {
-        return (left: nil, center: ModalHeaderData(title: L10n.chatWPBackgroundTitle), right: nil)
+        return (left: ModalHeaderData(image: theme.icons.modalClose, handler: { [weak self] in
+            self?.close()
+        }), center: ModalHeaderData(title: L10n.chatWPBackgroundTitle), right: nil)
     }
     
     override func measure(size: NSSize) {
@@ -191,19 +192,21 @@ class ChatWallpaperModalController: ModalViewController {
         
         let interaction = ThemeGridControllerInteraction(openWallpaper: { wallpaper, telegramWallpaper in
             switch wallpaper {
-            case .image, .file, .color:
-                showModal(with: WallpaperPreviewController(context, wallpaper: wallpaper, source: telegramWallpaper != nil ? .gallery(telegramWallpaper!) : .none), for: mainWindow)
+            case .image, .file, .color, .gradient:
+                showModal(with: WallpaperPreviewController(context, wallpaper: wallpaper, source: telegramWallpaper != nil ? .gallery(telegramWallpaper!) : .none), for: context.window)
             default:
                 _ = updateThemeInteractivetly(accountManager: context.sharedContext.accountManager, f: { settings in
-                    return settings.withUpdatedWallpaper(wallpaper).withUpdatedBubbled(true)
+                    return settings.updateWallpaper{ $0.withUpdatedWallpaper(wallpaper) }.saveDefaultWallpaper()
                 }).start()
-                close()
+                delay(0.15, closure: {
+                    close()
+                })
             }
             
         }, deleteWallpaper: { wallpaper, telegramWallpaper in
-            if wallpaper.isSemanticallyEqual(to: theme.wallpaper) {
-                _ = updateThemeInteractivetly(accountManager: context.sharedContext.accountManager, f: {
-                    return $0.withUpdatedWallpaper(.builtin).withUpdatedBubbled(true)
+            if wallpaper.isSemanticallyEqual(to: theme.wallpaper.wallpaper) {
+                _ = updateThemeInteractivetly(accountManager: context.sharedContext.accountManager, f: { settings in
+                    return settings.updateWallpaper({ $0.withUpdatedWallpaper(settings.palette.wallpaper.wallpaper) }).saveDefaultWallpaper()
                 }).start()
             }
             
@@ -219,34 +222,36 @@ class ChatWallpaperModalController: ModalViewController {
             |> map { wallpapers, deletedWallpapers, appearance -> (ThemeGridEntryTransition, Bool) in
                 var entries: [ThemeGridControllerEntry] = []
                 var index = 0
-                entries.append(ThemeGridControllerEntry(index: index, wallpaper: .none, telegramWallapper: nil, selected: appearance.presentation.wallpaper.isSemanticallyEqual(to: .none)))
+                
+                entries.append(ThemeGridControllerEntry(index: index, wallpaper: .none, telegramWallapper: nil, selected: appearance.presentation.wallpaper.wallpaper.isSemanticallyEqual(to: .none)))
                 index += 1
                 
                 
                 let telegramWallpaper: TelegramWallpaper? = wallpapers.first(where: { wallpaper -> Bool in
                     let wallpaper: Wallpaper = Wallpaper(wallpaper)
-                    return wallpaper.isSemanticallyEqual(to: theme.wallpaper)
+                    return wallpaper.isSemanticallyEqual(to: theme.wallpaper.wallpaper)
                 })
-                let selected: Wallpaper = theme.wallpaper
+                let selected: Wallpaper = theme.wallpaper.wallpaper
                 
                 
-                if let c_wallpaper = theme.c_wallpaper {
-                    switch c_wallpaper {
-                    case .color:
-                        entries.append(ThemeGridControllerEntry(index: index, wallpaper: c_wallpaper, telegramWallapper: nil, selected: theme.wallpaper.isSemanticallyEqual(to: c_wallpaper)))
-                        index += 1
-                    default:
-                        break
+                let wallpaper: Wallpaper
+                
+                switch theme.wallpaper.wallpaper {
+                case .gradient:
+                    entries.append(ThemeGridControllerEntry(index: index, wallpaper: theme.wallpaper.wallpaper, telegramWallapper: nil, selected: true))
+                default:
+                    if theme.colors.accent != theme.colors.basicAccent {
+                        wallpaper = .color(theme.colors.basicAccent.argb)
+                    } else {
+                        wallpaper = .color(theme.colors.basicAccent.lighter(amount: 0.25).argb)
                     }
-                    
-                } else {
-                    let wallpaper: Wallpaper = .color(Int32(bitPattern: theme.colors.blueUI.rgb))
-                    entries.append(ThemeGridControllerEntry(index: index, wallpaper: .color(Int32(bitPattern: theme.colors.blueUI.rgb)), telegramWallapper: nil, selected: theme.wallpaper.isSemanticallyEqual(to: wallpaper)))
+                    entries.append(ThemeGridControllerEntry(index: index, wallpaper: wallpaper, telegramWallapper: nil, selected: theme.wallpaper.wallpaper.isSemanticallyEqual(to: wallpaper)))
                 }
+                
 
                 
                 switch selected {
-                case .none, .color:
+                case .none, .color, .gradient:
                     break
                 default:
                     entries.append(ThemeGridControllerEntry(index: index, wallpaper: selected, telegramWallapper: telegramWallpaper, selected: true))
@@ -267,7 +272,7 @@ class ChatWallpaperModalController: ModalViewController {
                         if selected.isSemanticallyEqual(to: wallpaper) {
                             continue
                         }
-                        entries.append(ThemeGridControllerEntry(index: index, wallpaper: wallpaper, telegramWallapper: item, selected: appearance.presentation.wallpaper.isSemanticallyEqual(to: wallpaper)))
+                        entries.append(ThemeGridControllerEntry(index: index, wallpaper: wallpaper, telegramWallapper: item, selected: appearance.presentation.wallpaper.wallpaper.isSemanticallyEqual(to: wallpaper)))
                         index += 1
                     }
                 }

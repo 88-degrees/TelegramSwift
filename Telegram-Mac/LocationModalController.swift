@@ -9,10 +9,11 @@
 import Cocoa
 import TGUIKit
 import MapKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
-import MtProtoKitMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
+
 
 
 private enum PickLocationState : Equatable {
@@ -42,14 +43,15 @@ private final class LocationPinView : View {
         addSubview(locationPin)
         addSubview(dotView)
         dotView.layer?.cornerRadius = 2
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         locationPin.image = theme.icons.locationMapPin
         locationPin.sizeToFit()
-        dotView.backgroundColor = theme.colors.blueIcon
+        dotView.backgroundColor = theme.colors.accentIcon
     }
     
     override func layout() {
@@ -104,7 +106,7 @@ private final class LocationMapView : View {
         header.addSubview(locateButton)
         addSubview(header)
         addSubview(tableView)
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
         
         expandButton.isEventLess = true
         expandButton.userInteractionEnabled = false
@@ -122,18 +124,18 @@ private final class LocationMapView : View {
         return CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
-        
-        locationPinView.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
+        locationPinView.updateLocalizationAndTheme(theme: theme)
         expandButton.set(font: .medium(.title), for: .Normal)
-        expandButton.set(color: theme.colors.blueUI, for: .Normal)
+        expandButton.set(color: theme.colors.accent, for: .Normal)
         dismiss.set(image: theme.icons.modalClose, for: .Normal)
         _ = locateButton.sizeToFit()
         _ = dismiss.sizeToFit()
         header.backgroundColor = theme.colors.background
         header.border = [.Bottom]
-        loadingView.progressColor = theme.colors.blueUI
+        loadingView.progressColor = theme.colors.accent
         expandContainer.border = [.Top]
         expandContainer.backgroundColor = theme.colors.background
         let title = TextViewLayout(.initialize(string: L10n.locationSendTitle, color: theme.colors.text, font: .medium(.title)), maximumNumberOfLines: 1)
@@ -579,6 +581,7 @@ class LocationModalController: ModalViewController {
                     let first = Signal<(ChatContextResultCollection?, CLLocation?, Bool, Bool), NoError>.single((cachedData[query] ?? previousResult.modify {$0}, location.location, cachedData[query] == nil, !query.isEmpty))
                     if cachedData[query] == nil {
                         return first |> then(requestChatContextResults(account: context.account, botId: botId, peerId: peerId, query: query, location: .single((location.coordinate.latitude, location.coordinate.longitude)), offset: "")
+                            |> `catch` { _ in return .complete() }
                             |> deliverOnPrepareQueue |> map { result in
                                 var value = result
                                 if let result = result {
@@ -622,8 +625,8 @@ class LocationModalController: ModalViewController {
                 switch pick {
                 case let .custom(location, _):
                     if let location = location {
-                        return .single(state) |> then(googleVenueForLatitude(location.coordinate.latitude, longitude: location.coordinate.longitude) |> map { value in
-                            return .normal(.custom(location, named: value))
+                        return .single(state) |> then(reverseGeocodeLocation(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude) |> map { value in
+                            return .normal(.custom(location, named: value?.fullAddress))
                         })
                     }
                 default:
@@ -660,8 +663,6 @@ class LocationModalController: ModalViewController {
             self.readyOnce()
         }))
         
-        
-        
     }
     
     deinit {
@@ -671,46 +672,5 @@ class LocationModalController: ModalViewController {
     
     private var genericView: LocationMapView {
         return view as! LocationMapView
-    }
-}
-
-
-private func googleVenueForLatitude(_ latitude: Double, longitude: Double) -> Signal<String?, NoError> {
-    return Signal { subscriber in
-        let string = "https://maps.googleapis.com/maps/api/geocode/json?latlng=\(latitude),\(longitude)&sensor=true&language=\(appAppearance.language.languageCode)"
-        let request = MTHttpRequestOperation.data(forHttpUrl: URL(string: string))
-        let disposable = request?.start(next: { value in
-            if let data = value as? Data {
-                let json = (try? JSONSerialization.jsonObject(with: data, options: [])) as? Dictionary<String, Any>
-                 if let results = json?["results"] as? Array<Any> {
-                    if let first = results.first as? Dictionary<String, Any> {
-                        if let components = first["address_components"] as? [Any] {
-                            for component in components {
-                                if let component = component as? [String : Any] {
-                                    let types = component["types"] as? [String]
-                                    let longName = component["long_name"] as? String
-                                    if let types = types, types.contains("route") {
-                                        subscriber.putNext(longName)
-                                        subscriber.putCompletion()
-                                        return
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-            }
-            subscriber.putNext("")
-            subscriber.putCompletion()
-        }, error: { error in
-            subscriber.putNext("")
-            subscriber.putCompletion()
-        }, completed: {
-            subscriber.putCompletion()
-        })
-        return ActionDisposable {
-            disposable?.dispose()
-        }
     }
 }

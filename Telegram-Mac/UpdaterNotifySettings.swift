@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
-
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
+import SyncCore
 enum LaunchNavigation : PostboxCoding, Equatable {
     case chat(PeerId, necessary: Bool)
     case settings
@@ -44,15 +45,20 @@ struct LaunchSettings: PreferencesEntry, Equatable {
 
     let navigation: LaunchNavigation?
     let applyText: String?
-    
-    init(applyText: String?, navigation: LaunchNavigation?) {
+    let previousText: String?
+    let openAtLaunch: Bool
+    init(applyText: String?, previousText: String?, navigation: LaunchNavigation?, openAtLaunch: Bool) {
         self.applyText = applyText
         self.navigation = navigation
+        self.previousText = previousText
+        self.openAtLaunch = openAtLaunch
     }
     
     init(decoder: PostboxDecoder) {
         self.applyText = decoder.decodeOptionalStringForKey("at")
         self.navigation = decoder.decodeObjectForKey("n", decoder: { LaunchNavigation(decoder: $0) }) as? LaunchNavigation
+        self.previousText = decoder.decodeOptionalStringForKey("pt")
+        self.openAtLaunch = decoder.decodeBoolForKey("oat", orElse: true)
     }
     
     func encode(_ encoder: PostboxEncoder) {
@@ -66,6 +72,12 @@ struct LaunchSettings: PreferencesEntry, Equatable {
         } else {
             encoder.encodeNil(forKey: "n")
         }
+        if let previousText = previousText {
+            encoder.encodeString(previousText, forKey: "pt")
+        } else {
+            encoder.encodeNil(forKey: "pt")
+        }
+        encoder.encodeBool(self.openAtLaunch, forKey: "oat")
     }
     
     func isEqual(to: PreferencesEntry) -> Bool {
@@ -78,15 +90,20 @@ struct LaunchSettings: PreferencesEntry, Equatable {
     
     
     func withUpdatedApplyText(_ applyText: String?) -> LaunchSettings {
-        return LaunchSettings(applyText: applyText, navigation: self.navigation)
+        return LaunchSettings(applyText: applyText, previousText: self.previousText, navigation: self.navigation, openAtLaunch: self.openAtLaunch)
     }
     func withUpdatedNavigation(_ navigation: LaunchNavigation?) -> LaunchSettings {
-        return LaunchSettings(applyText: self.applyText, navigation: navigation)
+        return LaunchSettings(applyText: self.applyText, previousText: self.previousText, navigation: navigation, openAtLaunch: self.openAtLaunch)
     }
-
+    func withUpdatedPreviousText(_ previousText: String?) -> LaunchSettings {
+        return LaunchSettings(applyText: self.applyText, previousText: previousText, navigation: self.navigation, openAtLaunch: self.openAtLaunch)
+    }
+    func withUpdatedOpenAtLaunch(_ openAtLaunch: Bool) -> LaunchSettings {
+        return LaunchSettings(applyText: self.applyText, previousText: self.previousText, navigation: self.navigation, openAtLaunch: openAtLaunch)
+    }
     
     static var defaultSettings: LaunchSettings {
-        return LaunchSettings(applyText: nil, navigation: nil)
+        return LaunchSettings(applyText: nil, previousText: nil, navigation: nil, openAtLaunch: true)
     }
 }
 
@@ -125,7 +142,7 @@ func updateLaunchSettings(_ postbox: Postbox, _ f: @escaping(LaunchSettings)->La
 }
 
 
-func getUpdateNotifySettings(postbox: Postbox) -> Signal<LaunchSettings, NoError> {
+func appLaunchSettings(postbox: Postbox) -> Signal<LaunchSettings, NoError> {
     return postbox.transaction { transaction -> LaunchSettings in
         return transaction.getPreferencesEntry(key: ApplicationSpecificPreferencesKeys.launchSettings) as? LaunchSettings ?? LaunchSettings.defaultSettings
     }
@@ -135,8 +152,10 @@ func getUpdateNotifySettings(postbox: Postbox) -> Signal<LaunchSettings, NoError
 func applyUpdateTextIfNeeded(_ postbox: Postbox) -> Signal<Never, NoError> {
     return postbox.transaction { transaction -> Void in
         var applyText: String?
+        var previousText: String?
         transaction.updatePreferencesEntry(key: ApplicationSpecificPreferencesKeys.launchSettings, { pref in
             applyText = (pref as? LaunchSettings)?.applyText
+            previousText = (pref as? LaunchSettings)?.previousText
             return (pref as? LaunchSettings)?.withUpdatedApplyText(nil)
         })
         if let applyText = applyText {
@@ -146,11 +165,25 @@ func applyUpdateTextIfNeeded(_ postbox: Postbox) -> Signal<Never, NoError> {
             if let index = index {
                 let boldLine = MessageTextEntity(range: 0 ..< index.encodedOffset, type: .Bold)
                 attributes.append(TextEntitiesMessageAttribute(entities: [boldLine]))
+                
+                 if let previousText = previousText, let prevIndex = previousText.firstIndex(of: "\n") {
+                    let apply = String(applyText[index...])
+                    let previous = String(previousText[prevIndex...])
+                    if apply == previous {
+                        return
+                    }
+                }
             }
+            
             
             let peerId = PeerId(namespace: Namespaces.Peer.CloudUser, id: 777000)
             let message = StoreMessage(peerId: peerId, namespace: Namespaces.Message.Local, globallyUniqueId: nil, groupingKey: nil, timestamp: Int32(Date().timeIntervalSince1970), flags: [.Incoming], tags: [], globalTags: [], localTags: [], forwardInfo: nil, authorId: peerId, text: applyText, attributes: attributes, media: [])
             _ = transaction.addMessages([message], location: .UpperHistoryBlock)
+            
+            transaction.updatePreferencesEntry(key: ApplicationSpecificPreferencesKeys.launchSettings, { pref in
+                return (pref as? LaunchSettings)?.withUpdatedPreviousText(applyText)
+            })
+            
         }
     } |> ignoreValues
 }

@@ -8,9 +8,30 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
+
+
+enum EditSettingsEntryTag: ItemListItemTag {
+    case bio
+    
+    func isEqual(to other: ItemListItemTag) -> Bool {
+        if let other = other as? EditSettingsEntryTag, self == other {
+            return true
+        } else {
+            return false
+        }
+    }
+    var stableId: InputDataEntryId {
+        switch self {
+        case .bio:
+            return .input(_id_about)
+        }
+    }
+}
+
 
 private func valuesRequiringUpdate(state: EditInfoState, view: PeerView) -> ((fn: String, ln: String)?, about: String?) {
     if let peer = view.peers[view.peerId] as? TelegramUser {
@@ -58,7 +79,7 @@ struct EditInfoState : Equatable {
             return false
         }
         
-        return lhs.firstName == rhs.firstName && lhs.lastName == rhs.lastName && lhs.username == rhs.username && lhs.phone == rhs.phone && lhs.representation == rhs.representation && lhs.updatingPhotoState == rhs.updatingPhotoState && lhs.stateInited == rhs.stateInited
+        return lhs.firstName == rhs.firstName && lhs.lastName == rhs.lastName && lhs.username == rhs.username && lhs.phone == rhs.phone && lhs.representation == rhs.representation && lhs.updatingPhotoState == rhs.updatingPhotoState && lhs.stateInited == rhs.stateInited && lhs.peerStatusSettings == rhs.peerStatusSettings
     }
     
     let firstName: String
@@ -70,7 +91,9 @@ struct EditInfoState : Equatable {
     let updatingPhotoState: PeerInfoUpdatingPhotoState?
     let stateInited: Bool
     let peer: Peer?
-    init(stateInited: Bool = false, firstName: String = "", lastName: String = "", about: String = "", username: String? = nil, phone: String? = nil, representation: TelegramMediaImageRepresentation? = nil, updatingPhotoState: PeerInfoUpdatingPhotoState? = nil, peer: Peer? = nil) {
+    let peerStatusSettings: PeerStatusSettings?
+    let addToException: Bool
+    init(stateInited: Bool = false, firstName: String = "", lastName: String = "", about: String = "", username: String? = nil, phone: String? = nil, representation: TelegramMediaImageRepresentation? = nil, updatingPhotoState: PeerInfoUpdatingPhotoState? = nil, peer: Peer? = nil, peerStatusSettings: PeerStatusSettings? = nil, addToException: Bool = true) {
         self.firstName = firstName
         self.lastName = lastName
         self.about = about
@@ -80,6 +103,8 @@ struct EditInfoState : Equatable {
         self.updatingPhotoState = updatingPhotoState
         self.stateInited = stateInited
         self.peer = peer
+        self.peerStatusSettings = peerStatusSettings
+        self.addToException = addToException
     }
     
     init(_ peerView: PeerView) {
@@ -93,34 +118,40 @@ struct EditInfoState : Equatable {
         self.representation = peer?.smallProfileImage
         self.updatingPhotoState = nil
         self.stateInited = true
+        self.peerStatusSettings = (peerView.cachedData as? CachedUserData)?.peerStatusSettings
+        self.addToException = true
     }
     
     func withUpdatedInited(_ stateInited: Bool) -> EditInfoState {
-        return EditInfoState(stateInited: stateInited, firstName: self.firstName, lastName: self.lastName, about: self.about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: self.updatingPhotoState, peer: self.peer)
+        return EditInfoState(stateInited: stateInited, firstName: self.firstName, lastName: self.lastName, about: self.about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: self.updatingPhotoState, peer: self.peer, peerStatusSettings: self.peerStatusSettings, addToException: self.addToException)
     }
     func withUpdatedAbout(_ about: String) -> EditInfoState {
-        return EditInfoState(stateInited: self.stateInited, firstName: self.firstName, lastName: self.lastName, about: about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: self.updatingPhotoState, peer: self.peer)
+        return EditInfoState(stateInited: self.stateInited, firstName: self.firstName, lastName: self.lastName, about: about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: self.updatingPhotoState, peer: self.peer, peerStatusSettings: self.peerStatusSettings, addToException: self.addToException)
     }
     
     
     func withUpdatedFirstName(_ firstName: String) -> EditInfoState {
-        return EditInfoState(stateInited: self.stateInited, firstName: firstName, lastName: self.lastName, about: self.about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: self.updatingPhotoState, peer: self.peer)
+        return EditInfoState(stateInited: self.stateInited, firstName: firstName, lastName: self.lastName, about: self.about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: self.updatingPhotoState, peer: self.peer, peerStatusSettings: self.peerStatusSettings, addToException: self.addToException)
     }
     func withUpdatedLastName(_ lastName: String) -> EditInfoState {
-        return EditInfoState(stateInited: self.stateInited, firstName: self.firstName, lastName: lastName, about: self.about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: self.updatingPhotoState, peer: self.peer)
+        return EditInfoState(stateInited: self.stateInited, firstName: self.firstName, lastName: lastName, about: self.about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: self.updatingPhotoState, peer: self.peer, peerStatusSettings: self.peerStatusSettings, addToException: self.addToException)
     }
     
     func withUpdatedPeerView(_ peerView: PeerView) -> EditInfoState {
         let peer = peerView.peers[peerView.peerId] as? TelegramUser
         let about = stateInited ? self.about : (peerView.cachedData as? CachedUserData)?.about ?? self.about
-        
-        return EditInfoState(stateInited: true, firstName: stateInited ? self.firstName : peer?.firstName ?? self.firstName, lastName: stateInited ? self.lastName : peer?.lastName ?? self.lastName, about: about, username: peer?.username, phone: peer?.phone, representation: peer?.smallProfileImage, updatingPhotoState: self.updatingPhotoState, peer: peer)
+        let peerStatusSettings = (peerView.cachedData as? CachedUserData)?.peerStatusSettings
+        return EditInfoState(stateInited: true, firstName: stateInited ? self.firstName : peer?.firstName ?? self.firstName, lastName: stateInited ? self.lastName : peer?.lastName ?? self.lastName, about: about, username: peer?.username, phone: peer?.phone, representation: peer?.smallProfileImage, updatingPhotoState: self.updatingPhotoState, peer: peer, peerStatusSettings: peerStatusSettings, addToException: self.addToException)
     }
     func withUpdatedUpdatingPhotoState(_ f: (PeerInfoUpdatingPhotoState?) -> PeerInfoUpdatingPhotoState?) -> EditInfoState {
-        return EditInfoState(stateInited: self.stateInited, firstName: self.firstName, lastName: self.lastName, about: self.about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: f(self.updatingPhotoState), peer: self.peer)
+        return EditInfoState(stateInited: self.stateInited, firstName: self.firstName, lastName: self.lastName, about: self.about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: f(self.updatingPhotoState), peer: self.peer, peerStatusSettings: self.peerStatusSettings, addToException: self.addToException)
     }
     func withoutUpdatingPhotoState() -> EditInfoState {
-        return EditInfoState(stateInited: self.stateInited, firstName: self.firstName, lastName: self.lastName, about: self.about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: nil, peer:self.peer)
+        return EditInfoState(stateInited: self.stateInited, firstName: self.firstName, lastName: self.lastName, about: self.about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: nil, peer:self.peer, peerStatusSettings: self.peerStatusSettings, addToException: self.addToException)
+    }
+    
+    func withUpdatedAddToException(_ addToException: Bool) -> EditInfoState {
+        return EditInfoState(stateInited: self.stateInited, firstName: self.firstName, lastName: self.lastName, about: self.about, username: self.username, phone: self.phone, representation: self.representation, updatingPhotoState: self.updatingPhotoState, peer:self.peer, peerStatusSettings: self.peerStatusSettings, addToException: addToException)
     }
 }
 
@@ -137,8 +168,11 @@ private func editInfoEntries(state: EditInfoState, arguments: EditInfoController
     var sectionId: Int32 = 0
     var index: Int32 = 0
     
+    entries.append(.sectionId(sectionId, type: .normal))
+    sectionId += 1
+    
     entries.append(InputDataEntry.custom(sectionId: sectionId, index: index, value: .none, identifier: _id_info, equatable: InputDataEquatable(state), item: { size, stableId -> TableRowItem in
-        return EditAccountInfoItem(size, stableId: stableId, account: arguments.context.account, state: state, updateText: { firstName, lastName in
+        return EditAccountInfoItem(size, stableId: stableId, account: arguments.context.account, state: state, viewType: .singleItem, updateText: { firstName, lastName in
             updateState { current in
                 return current.withUpdatedFirstName(firstName).withUpdatedLastName(lastName).withUpdatedInited(true)
             }
@@ -148,47 +182,55 @@ private func editInfoEntries(state: EditInfoState, arguments: EditInfoController
     }))
     index += 1
     
-    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.editAccountNameDesc), color: theme.colors.grayText, detectBold: true))
+    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.editAccountNameDesc), data: InputDataGeneralTextData(viewType: .textBottomItem)))
     index += 1
 
     
-    entries.append(InputDataEntry.sectionId(sectionId))
+    entries.append(.sectionId(sectionId, type: .normal))
     sectionId += 1
     
-    entries.append(.input(sectionId: sectionId, index: index, value: .string(state.about), error: nil, identifier: _id_about, mode: .plain, placeholder: InputDataInputPlaceholder(L10n.telegramBioViewController), inputPlaceholder: L10n.bioPlaceholder, filter: {$0}, limit: 70))
+    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.bioHeader), data: InputDataGeneralTextData(viewType: .textTopItem)))
+    index += 1
+
+    
+    entries.append(.input(sectionId: sectionId, index: index, value: .string(state.about), error: nil, identifier: _id_about, mode: .plain, data: InputDataRowData(viewType: .singleItem), placeholder: nil, inputPlaceholder: L10n.bioPlaceholder, filter: {$0}, limit: 70))
     index += 1
     
-    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.bioDescription), color: theme.colors.grayText, detectBold: true))
+    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.bioDescription), data: InputDataGeneralTextData(viewType: .textBottomItem)))
     index += 1
     
-    entries.append(InputDataEntry.sectionId(sectionId))
+    entries.append(.sectionId(sectionId, type: .normal))
     sectionId += 1
     
-    entries.append(.general(sectionId: sectionId, index: index, value: .none, error: nil, identifier: _id_username, data: InputDataGeneralData(name: L10n.editAccountUsername, color: theme.colors.text, icon: nil, type: .nextContext(state.username != nil ? "@\(state.username!)" : ""), action: nil)))
+    entries.append(.general(sectionId: sectionId, index: index, value: .none, error: nil, identifier: _id_username, data: InputDataGeneralData(name: L10n.editAccountUsername, color: theme.colors.text, icon: nil, type: .nextContext(state.username != nil ? "@\(state.username!)" : ""), viewType: .firstItem, action: nil)))
     index += 1
 
-    entries.append(.general(sectionId: sectionId, index: index, value: .none, error: nil, identifier: _id_phone, data: InputDataGeneralData(name: L10n.editAccountChangeNumber, color: theme.colors.text, icon: nil, type: .nextContext(state.phone != nil ? formatPhoneNumber(state.phone!) : ""), action: nil)))
+    entries.append(.general(sectionId: sectionId, index: index, value: .none, error: nil, identifier: _id_phone, data: InputDataGeneralData(name: L10n.editAccountChangeNumber, color: theme.colors.text, icon: nil, type: .nextContext(state.phone != nil ? formatPhoneNumber(state.phone!) : ""), viewType: .lastItem, action: nil)))
     index += 1
 
-    entries.append(InputDataEntry.sectionId(sectionId))
+    entries.append(.sectionId(sectionId, type: .normal))
     sectionId += 1
     
     if activeAccounts.count < 3 {
-        entries.append(InputDataEntry.general(sectionId: sectionId, index: index, value: .none, error: nil, identifier: _id_add_account, data: InputDataGeneralData(name: L10n.editAccountAddAccount, color: theme.colors.blueUI, icon: nil, type: .none, action: {
+        entries.append(InputDataEntry.general(sectionId: sectionId, index: index, value: .none, error: nil, identifier: _id_add_account, data: InputDataGeneralData(name: L10n.editAccountAddAccount, color: theme.colors.accent, icon: nil, type: .none, viewType: .firstItem, action: {
             arguments.addAccount()
         })))
         index += 1
     }
    
     
-    entries.append(.general(sectionId: sectionId, index: index, value: .none, error: nil, identifier: _id_logout, data: InputDataGeneralData(name: L10n.editAccountLogout, color: theme.colors.redUI, icon: nil, type: .none, action: nil)))
+    entries.append(.general(sectionId: sectionId, index: index, value: .none, error: nil, identifier: _id_logout, data: InputDataGeneralData(name: L10n.editAccountLogout, color: theme.colors.redUI, icon: nil, type: .none, viewType: activeAccounts.count < 3 ? .lastItem : .singleItem, action: nil)))
     index += 1
+    
+    entries.append(.sectionId(sectionId, type: .normal))
+    sectionId += 1
     
     return entries
 }
 
 
-func EditAccountInfoController(context: AccountContext, f: @escaping((ViewController)) -> Void) -> Void {
+func EditAccountInfoController(context: AccountContext, focusOnItemTag: EditSettingsEntryTag? = nil, f: @escaping((ViewController)) -> Void) -> Void {
+    
     let state: Promise<EditInfoState> = Promise()
     let stateValue: Atomic<EditInfoState> = Atomic(value: EditInfoState())
     let actionsDisposable = DisposableSet()
@@ -229,7 +271,7 @@ func EditAccountInfoController(context: AccountContext, f: @escaping((ViewContro
                 
                 _ = (putToTemp(image: image, compress: true) |> deliverOnMainQueue).start(next: { path in
                     let controller = EditImageModalController(URL(fileURLWithPath: path), settings: .disableSizes(dimensions: .square))
-                    showModal(with: controller, for: mainWindow)
+                    showModal(with: controller, for: mainWindow, animationType: .scaleCenter)
                     
                     let updateSignal = controller.result |> map { path, _ -> TelegramMediaResource in
                         return LocalFileReferenceMediaResource(localFilePath: path.path, randomId: arc4random64())
@@ -276,7 +318,7 @@ func EditAccountInfoController(context: AccountContext, f: @escaping((ViewContro
         })
         
     }, logout: {
-        showModal(with: InputDataModalController(LogoutViewController(context: context, f: f), modalInteractions: ModalInteractions(acceptTitle: L10n.modalCancel)), for: mainWindow)
+        showModal(with: LogoutViewController(context: context, f: f), for: context.window)
     }, username: {
         f(UsernameSettingsViewController(context))
     }, changeNumber: {
@@ -286,7 +328,7 @@ func EditAccountInfoController(context: AccountContext, f: @escaping((ViewContro
         context.sharedContext.beginNewAuth(testingEnvironment: testingEnvironment)
     })
     
-    f(InputDataController(dataSignal: combineLatest(state.get() |> deliverOnPrepareQueue, appearanceSignal |> deliverOnPrepareQueue, context.sharedContext.activeAccountsWithInfo) |> map {editInfoEntries(state: $0.0, arguments: arguments, activeAccounts: $0.2.accounts, updateState: updateState)} |> map { InputDataSignalValue(entries: $0) }, title: L10n.navigationEdit, validateData: { data -> InputDataValidation in
+    let controller = InputDataController(dataSignal: combineLatest(state.get() |> deliverOnPrepareQueue, appearanceSignal |> deliverOnPrepareQueue, context.sharedContext.activeAccountsWithInfo) |> map {editInfoEntries(state: $0.0, arguments: arguments, activeAccounts: $0.2.accounts, updateState: updateState)} |> map { InputDataSignalValue(entries: $0) }, title: L10n.editAccountTitle, validateData: { data -> InputDataValidation in
         
         if let _ = data[_id_logout] {
             arguments.logout()
@@ -319,7 +361,7 @@ func EditAccountInfoController(context: AccountContext, f: @escaping((ViewContro
                     updateState { $0 }
                 }))
             }
-        })
+            })
     }, updateDatas: { data in
         updateState { current in
             return current.withUpdatedAbout(data[_id_about]?.stringValue ?? "")
@@ -337,5 +379,13 @@ func EditAccountInfoController(context: AccountContext, f: @escaping((ViewContro
                 f(.disabled(L10n.navigationDone))
             }
         }
-    }, removeAfterDisappear: false, identifier: "account"))
+    }, removeAfterDisappear: false, identifier: "account")
+    
+    controller.didLoaded = { controller, _ in
+        if let focusOnItemTag = focusOnItemTag {
+            controller.genericView.tableView.scroll(to: .center(id: focusOnItemTag.stableId, innerId: nil, animated: true, focus: .init(focus: true), inset: 0), inset: NSEdgeInsets())
+        }
+    }
+    
+    f(controller)
 }

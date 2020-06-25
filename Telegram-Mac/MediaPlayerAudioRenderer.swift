@@ -1,8 +1,9 @@
 import Foundation
-import SwiftSignalKitMac
+import SwiftSignalKit
 import CoreMedia
 import AVFoundation
-import TelegramCoreMac
+import TelegramCore
+import SyncCore
 
 private enum AudioPlayerRendererState {
     case paused
@@ -239,7 +240,7 @@ private final class AudioPlayerRendererContext {
     }
     
     deinit {
-        assert(audioPlayerRendererQueue.isCurrent())
+       // assert(audioPlayerRendererQueue.isCurrent())
         
         self.audioSessionDisposable.dispose()
         

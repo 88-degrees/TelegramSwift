@@ -1306,6 +1306,10 @@ inline int colorIndexForGroupId(int64_t groupId)
     return colorIndex;
 }
 
+/*
+ Sorry guys there was a code which caused a crash on text input
+ */
+
 NSArray<NSString *> * __nonnull currentAppInputSource()
 {
     
@@ -1326,3 +1330,12 @@ NSArray<NSString *> * __nonnull currentAppInputSource()
     return inputs;
 }
 
+NSEvent * __nullable createScrollWheelEvent() {
+    CGEventRef upEvent = CGEventCreateScrollWheelEvent(
+                                                       NULL,
+                                                       kCGScrollEventUnitPixel,
+                                                       1, 0, 0 );
+    NSEvent *event = [NSEvent eventWithCGEvent:upEvent];
+    CFRelease(upEvent);
+    return event;
+}

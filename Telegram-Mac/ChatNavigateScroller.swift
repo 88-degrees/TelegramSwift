@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 
 
 class ChatNavigateScroller: ImageButton {
@@ -31,7 +32,7 @@ class ChatNavigateScroller: ImageButton {
             if let strongSelf = self {
                 let count = unreadView.count(for: chatLocation.unreadMessageCountsItem) ?? 0
                 if count > 0 {
-                    strongSelf.badge = BadgeNode(.initialize(string: Int(count).prettyNumber, color: .white, font: .bold(.small)), theme.colors.blueUI)
+                    strongSelf.badge = BadgeNode(.initialize(string: Int(count).prettyNumber, color: theme.colors.underSelectedColor, font: .bold(.small)), theme.colors.accent)
                     strongSelf.badge!.view = strongSelf.badgeView
                     strongSelf.badgeView.setFrameSize(strongSelf.badge!.size)
                     strongSelf.addSubview(strongSelf.badgeView)
@@ -42,13 +43,26 @@ class ChatNavigateScroller: ImageButton {
 
             }
         }))
+        
+       updateLocalizationAndTheme(theme: theme)
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         set(image: theme.icons.chatScrollUp, for: .Normal)
         set(image: theme.icons.chatScrollUpActive, for: .Highlight)
-        badge?.fillColor = theme.colors.blueUI
+        badge?.fillColor = theme.colors.accent
+        
+        if theme.colors.chatBackground == theme.colors.background && theme.colors.isDark {
+          
+
+        }
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 5
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.1)
+        shadow.shadowOffset = NSMakeSize(0, 2)
+        self.shadow = shadow
     }
     
     override func scrollWheel(with event: NSEvent) {

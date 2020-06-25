@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 private final class PlayerListArguments {
     let chatInteraction: ChatInteraction
@@ -43,7 +44,7 @@ private enum PlayerListEntry: TableItemListNodeEntry {
     func item(_ arguments: PlayerListArguments, initialSize: NSSize) -> TableRowItem {
         switch self {
         case let .message(_, message):
-            return PeerMediaMusicRowItem(initialSize, arguments.chatInteraction, .messageEntry(message, .defaultSettings),  isCompactPlayer: true)
+            return PeerMediaMusicRowItem(initialSize, arguments.chatInteraction, .messageEntry(message, .defaultSettings, .singleItem),  isCompactPlayer: true)
         }
     }
     
@@ -112,6 +113,10 @@ class PlayerListController: TableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         
+        genericView.getBackgroundColor = {
+            return theme.colors.background
+        }
+        
         let location = ValuePromise<ChatHistoryLocation>(ignoreRepeated: true)
         
         let historyViewUpdate = location.get() |> deliverOnMainQueue
@@ -170,7 +175,7 @@ class PlayerListController: TableViewController {
             self.genericView.merge(with: transition)
             if !self.didSetReady, !self.genericView.isEmpty {
                 self.view.setFrameSize(300, min(self.genericView.listHeight, 325))
-                self.genericView.scroll(to: .top(id: PeerMediaSharedEntryStableId.messageId(self.messageIndex.id), innerId: nil, animated: false, focus: false, inset: -25))
+                self.genericView.scroll(to: .top(id: PeerMediaSharedEntryStableId.messageId(self.messageIndex.id), innerId: nil, animated: false, focus: .init(focus: false), inset: -25))
                 self.readyOnce()
             }
         }))

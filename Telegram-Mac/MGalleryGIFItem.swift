@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
 class MGalleryGIFItem: MGalleryItem {
 
@@ -19,13 +20,13 @@ class MGalleryGIFItem: MGalleryItem {
         let view = self.view
         let pathSignal = path.get() |> map { path in
            return AVGifData.dataFrom(path)
-        } |> distinctUntilChanged |> deliverOnMainQueue |> mapToSignal { data -> Signal<(AVGifData?,GIFPlayerView), NoError> in
+        } |> distinctUntilChanged |> deliverOnMainQueue |> mapToSignal { data -> Signal<Tuple2<AVGifData?,GIFPlayerView>, NoError> in
             return view.get() |> distinctUntilChanged |> map { view in
-                return (data, view as! GIFPlayerView)
+                return Tuple(data, view as! GIFPlayerView)
             }
         }
-        disposable.set(pathSignal.start(next: { (data, view) in
-            view.set(data: data)
+        disposable.set(pathSignal.start(next: { tuple in
+            tuple._1.set(data: tuple._0)
         }))
         
     }
@@ -67,7 +68,7 @@ class MGalleryGIFItem: MGalleryItem {
     }
     
     override var sizeValue: NSSize {
-        if let size = media.dimensions {
+        if let size = media.dimensions?.size {
             return size.fitted(pagerSize)
         }
         return pagerSize
@@ -75,10 +76,10 @@ class MGalleryGIFItem: MGalleryItem {
     
     override func request(immediately: Bool) {
         
-        let signal:Signal<(TransformImageArguments) -> DrawingContext?,NoError> = chatMessageVideo(postbox: context.account.postbox, fileReference: entry.fileReference(media), scale: System.backingScale)
+        let signal:Signal<ImageDataTransformation,NoError> = chatMessageVideo(postbox: context.account.postbox, fileReference: entry.fileReference(media), scale: System.backingScale)
         let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: sizeValue, boundingSize: sizeValue, intrinsicInsets: NSEdgeInsets())
-        let result = signal |> deliverOn(graphicsThreadPool) |> mapToThrottled { transform -> Signal<CGImage?, NoError> in
-            return .single(transform(arguments)?.generateImage())
+        let result = signal |> deliverOn(graphicsThreadPool) |> mapToThrottled { generator -> Signal<CGImage?, NoError> in
+            return .single(generator.execute(arguments, generator.data)?.generateImage())
         }
         
     
@@ -89,7 +90,7 @@ class MGalleryGIFItem: MGalleryItem {
             return .never()
         })
 
-        self.image.set(result |> map { .image($0) } |> deliverOnMainQueue)
+        self.image.set(result |> map { .image($0 != nil ? NSImage(cgImage: $0!, size: $0!.backingSize) : nil, nil) } |> deliverOnMainQueue)
     
         fetch()
     }

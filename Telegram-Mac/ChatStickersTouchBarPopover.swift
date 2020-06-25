@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 @available(OSX 10.12.2, *)
 fileprivate extension NSTouchBarItem.Identifier {
@@ -36,12 +37,14 @@ class StickersScrubberBarItem: NSCustomTouchBarItem, NSScrubberDelegate, NSScrub
     private static let headerItemViewIdentifier = "HeaderItemViewIdentifier"
 
     private let entries: [TouchBarStickerEntry]
-    private let account: Account
+    private let context: AccountContext
     private let sendSticker: (TelegramMediaFile)->Void
-    init(identifier: NSTouchBarItem.Identifier, account: Account, sendSticker:@escaping(TelegramMediaFile)->Void, entries: [TouchBarStickerEntry]) {
+    private let animated: Bool
+    init(identifier: NSTouchBarItem.Identifier, context: AccountContext, animated: Bool, sendSticker:@escaping(TelegramMediaFile)->Void, entries: [TouchBarStickerEntry]) {
         self.entries = entries
-        self.account = account
+        self.context = context
         self.sendSticker = sendSticker
+        self.animated = animated
         super.init(identifier: identifier)
         
         let scrubber = TGScrubber()
@@ -54,7 +57,55 @@ class StickersScrubberBarItem: NSCustomTouchBarItem, NSScrubberDelegate, NSScrub
         scrubber.delegate = self
         scrubber.dataSource = self
         
+        let gesture = NSPressGestureRecognizer(target: self, action: #selector(self.pressGesture(_:)))
+        gesture.allowedTouchTypes = NSTouch.TouchTypeMask.direct
+        gesture.minimumPressDuration = 0.3
+        gesture.allowableMovement = 0
+        scrubber.addGestureRecognizer(gesture)
+
+        
         self.view = scrubber
+    }
+    
+    fileprivate var modalPreview: PreviewModalController?
+    
+    @objc private func pressGesture(_ gesture: NSPressGestureRecognizer) {
+        
+        let runSelector:()->Void = { [weak self] in
+            guard let `self` = self else {
+                return
+            }
+            let scrollView = HackUtils.findElements(byClass: "NSScrollView", in: self.view)?.first as? NSScrollView
+            
+            guard let container = scrollView?.documentView?.subviews.first else {
+                return
+            }
+            var point = gesture.location(in: container)
+            point.y = 0
+            for itemView in container.subviews {
+                if NSPointInRect(point, itemView.frame) {
+                    if let itemView = itemView as? TouchBarStickerItemView {
+                        self.modalPreview?.update(with: itemView.quickPreview)
+                    }
+                }
+            }
+        }
+        
+        switch gesture.state {
+        case .began:
+            modalPreview = PreviewModalController(context)
+            showModal(with: modalPreview!, for: context.window)
+            runSelector()
+        case .failed, .cancelled, .ended:
+            modalPreview?.close()
+            modalPreview = nil
+        case .changed:
+           runSelector()
+        case .possible:
+            break
+        @unknown default:
+            break
+        }
     }
     
     required init?(coder: NSCoder) {
@@ -86,7 +137,7 @@ class StickersScrubberBarItem: NSCustomTouchBarItem, NSScrubberDelegate, NSScrub
             itemView = view
         case let .sticker(file):
             let view = scrubber.makeItem(withIdentifier: NSUserInterfaceItemIdentifier(rawValue: StickersScrubberBarItem.stickerItemViewIdentifier), owner: nil) as! TouchBarStickerItemView
-            view.update(account: account, file: file)
+            view.update(context: context, file: file, animated: self.animated)
             itemView = view
         }
         
@@ -134,7 +185,7 @@ final class ChatStickersTouchBarPopover : NSTouchBar, NSTouchBarDelegate {
     func touchBar(_ touchBar: NSTouchBar, makeItemForIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
         switch identifier {
         case .sticker:
-            let scrubberItem: NSCustomTouchBarItem = StickersScrubberBarItem(identifier: identifier, account: chatInteraction.context.account, sendSticker: { [weak self] file in
+            let scrubberItem: NSCustomTouchBarItem = StickersScrubberBarItem(identifier: identifier, context: chatInteraction.context, animated: true, sendSticker: { [weak self] file in
                 self?.dismiss(file)
             }, entries: self.entries)
             return scrubberItem

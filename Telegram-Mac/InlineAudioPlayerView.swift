@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 
 
@@ -89,9 +90,23 @@ class InlineAudioPlayerView: NavigationHeaderView, APDelegate {
             
         }, for: .Click)
         
+        
         progressView.onUserChanged = { [weak self] progress in
             self?.controller?.set(trackProgress: progress)
             self?.progressView.set(progress: CGFloat(progress), animated: false)
+        }
+        
+        var paused: Bool = false
+        
+        progressView.startScrobbling = { [weak self]  in
+            self?.controller?.pause()
+            paused = true
+        }
+        
+        progressView.endScrobbling = { [weak self]  in
+            if paused {
+                self?.controller?.play()
+            }
         }
         
         progressView.set(handler: { [weak self] control in
@@ -116,7 +131,7 @@ class InlineAudioPlayerView: NavigationHeaderView, APDelegate {
         textView.userInteractionEnabled = false
         textView.isEventLess = true
         
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
         
         containerView.set(handler: { [weak self] _ in
             self?.showAudioPlayerList()
@@ -138,7 +153,7 @@ class InlineAudioPlayerView: NavigationHeaderView, APDelegate {
         guard let window = kitWindow, let context = context else {return}
         let point = containerView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
         if NSPointInRect(point, textView.frame) {
-            if let song = controller?.currentSong {
+            if let song = controller?.currentSong, controller is APChatMusicController {
                 switch song.stableId {
                 case let .message(message):
                     showPopover(for: textView, with: PlayerListController(audioPlayer: self, context: context, messageIndex: MessageIndex(message)), edge: .minX, inset: NSMakePoint((300 - textView.frame.width) / 2, -60))
@@ -166,22 +181,22 @@ class InlineAudioPlayerView: NavigationHeaderView, APDelegate {
 
     
     private var playProgressStyle:ControlStyle {
-        return ControlStyle(foregroundColor: theme.colors.blueUI, backgroundColor: .clear)
+        return ControlStyle(foregroundColor: theme.colors.accent, backgroundColor: .clear)
     }
     private var fetchProgressStyle:ControlStyle {
         return ControlStyle(foregroundColor: theme.colors.grayTransparent, backgroundColor: .clear)
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
-        
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         playingSpeed.set(image: FastSettings.playingRate != 1.0 ? theme.icons.playingVoice2x : theme.icons.playingVoice1x, for: .Normal)
         previous.set(image: theme.icons.audioPlayerPrev, for: .Normal)
         next.set(image: theme.icons.audioPlayerNext, for: .Normal)
         playOrPause.set(image: theme.icons.audioPlayerPause, for: .Normal)
         dismiss.set(image: theme.icons.auduiPlayerDismiss, for: .Normal)
         
-        progressView.fetchingColor = theme.colors.blueUI.withAlphaComponent(0.5)
+        progressView.fetchingColor = theme.colors.accent.withAlphaComponent(0.5)
         
         if let controller = controller {
             repeatControl.set(image: controller.needRepeat ? theme.icons.audioPlayerRepeatActive : theme.icons.audioPlayerRepeat, for: .Normal)
@@ -214,7 +229,7 @@ class InlineAudioPlayerView: NavigationHeaderView, APDelegate {
     private func gotoMessage() {
         if let message = message, let context = context {
             if let controller = context.sharedContext.bindings.rootNavigation().controller as? ChatController, controller.chatInteraction.peerId == message.id.peerId {
-                controller.chatInteraction.focusMessageId(nil, message.id, .center(id: 0, innerId: nil, animated: true, focus: false, inset: 0))
+                controller.chatInteraction.focusMessageId(nil, message.id, .center(id: 0, innerId: nil, animated: true, focus: .init(focus: false), inset: 0))
             } else {
                 context.sharedContext.bindings.rootNavigation().push(ChatController(context: context, chatLocation: .peer(message.id.peerId), messageId: message.id))
             }
@@ -352,7 +367,7 @@ class InlineAudioPlayerView: NavigationHeaderView, APDelegate {
         
         let w = (repeatControl.isHidden ? dismiss.frame.minX : repeatControl.frame.minX) - next.frame.maxX
         
-        //textView.centerY(x: next.frame.maxX + floorToScreenPixels(scaleFactor: backingScaleFactor, (w - textView.frame.width)/2), addition: -2)
+        //textView.centerY(x: next.frame.maxX + floorToScreenPixels(backingScaleFactor, (w - textView.frame.width)/2), addition: -2)
         
         textView.center()
         

@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
-import PostboxMac
-import TelegramCoreMac
+import SwiftSignalKit
+import Postbox
+import TelegramCore
+import SyncCore
 import TGUIKit
 
 struct LockNotificationsData : Equatable {
@@ -44,8 +45,10 @@ struct LockNotificationsData : Equatable {
 
 final class SharedNotificationBindings {
     let navigateToChat:(Account, PeerId) -> Void
-    init(navigateToChat: @escaping(Account, PeerId) -> Void) {
+    let updateCurrectController:()->Void
+    init(navigateToChat: @escaping(Account, PeerId) -> Void, updateCurrectController: @escaping()->Void) {
         self.navigateToChat = navigateToChat
+        self.updateCurrectController = updateCurrectController
     }
 }
 
@@ -76,33 +79,35 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
         super.init()
         
      
-        
-       
-        
         NSUserNotificationCenter.default.delegate = self
         
         NotificationCenter.default.addObserver(self, selector: #selector(windowDidBecomeKey), name: NSWindow.didBecomeKeyNotification, object: window)
         NotificationCenter.default.addObserver(self, selector: #selector(windowDidResignKey), name: NSWindow.didResignKeyNotification, object: window)
         
         
-        
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(screenIsLocked), name: NSNotification.Name(rawValue: "com.apple.screenIsLocked"), object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(screenIsUnlocked), name: NSNotification.Name(rawValue: "com.apple.screenIsUnlocked"), object: nil)
 
-        
         
         _ = (_passlock.get() |> mapToSignal { show in additionalSettings(accountManager: accountManager) |> map { (show, $0) }} |> deliverOnMainQueue |> mapToSignal { show, settings -> Signal<Bool, NoError> in
             if show {
                 let controller = PasscodeLockController(accountManager, useTouchId: settings.useTouchId, logoutImpl: {
                     return self.logout()
-                })
+                }, updateCurrectController: bindings.updateCurrectController)
                 closeAllModals()
+                closeInstantView()
+                closeGalleryViewer(false)
                 showModal(with: controller, for: window, isOverlay: true)
                 return .single(show) |> then( controller.doneValue |> map {_ in return false} |> take(1) )
             }
             return .never()
             } |> deliverOnMainQueue).start(next: { [weak self] lock in
-                
+                for subview in window.contentView!.subviews {
+                    if let subview = subview as? SplitView {
+                        subview.isHidden = lock
+                        break
+                    }
+                }
                 self?.updateLocked { previous -> LockNotificationsData in
                     return previous.withUpdatedPasscodeLock(lock)
                 }
@@ -118,7 +123,11 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
         
         let passlock = Signal<Void, NoError>.single(Void()) |> delay(10, queue: Queue.concurrentDefaultQueue()) |> restart |> mapToSignal { () -> Signal<Int32?, NoError> in
             return accountManager.transaction { transaction -> Int32? in
-                return transaction.getAccessChallengeData().timeout
+                if transaction.getAccessChallengeData().isLockable {
+                    return passcodeSettings(transaction).timeout
+                } else {
+                    return nil
+                }
             }
             } |> map { [weak self] timeout -> Bool in
                 if let timeout = timeout {
@@ -227,7 +236,8 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
                 self.snoofEnabled = inAppSettings.showNotificationsOutOfFocus
                 
                 if inAppSettings.enabled && inAppSettings.muteUntil < Int32(Date().timeIntervalSince1970) {
-                    return .single((messages.filter({$0.2}).map {($0.0, $0.1)}, inAppSettings))
+                    
+                    return .single((messages.filter({$0.2 || ($0.0.isEmpty || $0.0[0].wasScheduled)}).map {($0.0, $0.1)}, inAppSettings))
                 } else {
                     return .complete()
                 }
@@ -240,7 +250,7 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
                 for message in messages.reduce([], { current, value in return current + value.0}) {
                     var peer = message.author
                     if let mainPeer = messageMainPeer(message) {
-                        if mainPeer is TelegramChannel || mainPeer is TelegramGroup {
+                        if mainPeer is TelegramChannel || mainPeer is TelegramGroup || message.wasScheduled {
                             peer = mainPeer
                         }
                     }
@@ -280,7 +290,7 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
                             continue
                         }
                         
-                        if message.author?.id != account.peerId {
+                        if message.author?.id != account.peerId || message.wasScheduled {
                             var title:String = message.author?.displayTitle ?? ""
                             var hasReplyButton:Bool = !screenIsLocked
                             if let peer = message.peers[message.id.peerId] {
@@ -291,13 +301,17 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
                                     hasReplyButton = false
                                 }
                             }
+                            
+                            if message.wasScheduled {
+                                hasReplyButton = false
+                            }
+                            
                             if screenIsLocked {
                                 title = appName
                             }
                             
-                            if self.activeAccounts.accounts.count > 1 && !screenIsLocked {
-                                title += " → \(accountPeer.addressName ?? accountPeer.displayTitle)"
-                            }
+                           
+                           
                             
                             var text = chatListText(account: account, for: message).string.nsstring
                             var subText:String?
@@ -307,24 +321,22 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
                                 subText = parts[0]
                             }
                             
+                            if message.wasScheduled {
+                                if message.id.peerId == account.peerId {
+                                    title = L10n.notificationReminder
+                                } else {
+                                    title = "📆 \(title)"
+                                }
+                                subText = nil
+                            }
+                            
+                            
                             if !inAppSettings.displayPreviews || message.peers[message.id.peerId] is TelegramSecretChat || screenIsLocked {
                                 text = L10n.notificationLockedPreview.nsstring
                                 subText = nil
                             }
                             
                             let notification = NSUserNotification()
-                            notification.title = title
-                            notification.informativeText = text as String
-                            notification.subtitle = subText
-                            notification.contentImage = screenIsLocked ? nil : images[message.id]
-                            notification.hasReplyButton = hasReplyButton
-                            
-                            notification.hasActionButton = true
-                            notification.otherButtonTitle = L10n.notificationMarkAsRead
-                           // notification.additionalActions = [NSUserNotificationAction(identifier: "read", title: "Mark as Read")]
-                            
-                            var dict: [String : Any] = [:]
-                            
                             
                             if localizedString(inAppSettings.tone) != tr(L10n.notificationSettingsToneNone) {
                                 notification.soundName = inAppSettings.tone
@@ -334,6 +346,30 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
                             
                             if message.muted {
                                 notification.soundName = nil
+                                title += " 🔕"
+                            }
+                            
+                   
+                            
+                            if self.activeAccounts.accounts.count > 1 && !screenIsLocked {
+                                title += " → \(accountPeer.addressName ?? accountPeer.displayTitle)"
+                            }
+                            
+                            notification.title = title
+                            notification.informativeText = text as String
+                            notification.subtitle = subText
+                            notification.contentImage = screenIsLocked ? nil : images[message.id]
+                            notification.hasReplyButton = hasReplyButton
+                            
+                            notification.hasActionButton = !message.wasScheduled
+                            notification.otherButtonTitle = L10n.notificationMarkAsRead
+                           // notification.additionalActions = [NSUserNotificationAction(identifier: "read", title: "Mark as Read")]
+                            
+                            var dict: [String : Any] = [:]
+                            
+                            
+                            if message.wasScheduled {
+                                dict["wasScheduled"] = true
                             }
                             
                             
@@ -372,7 +408,10 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
         if accountId != self.activeAccounts.primary?.id {
             return true
         }
-        return !snoofEnabled || !NSApp.isActive
+        
+        let wasScheduled = notification.userInfo?["wasScheduled"] as? Bool ?? false
+        
+        return !snoofEnabled || !NSApp.isActive || wasScheduled
     }
     
     
@@ -386,7 +425,6 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
             guard let account = activeAccounts.accounts.first(where: {$0.0 == accountId})?.1 else {
                 return
             }
-            
             
             _ = applyMaxReadIndexInteractively(postbox: account.postbox, stateManager: account.stateManager, index: MessageIndex(id: messageId, timestamp: timestamp)).start()
         }
@@ -405,7 +443,7 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
             
             closeAllModals()
             
-            if notification.activationType == .replied, let text = notification.response?.string {
+            if notification.activationType == .replied, let text = notification.response?.string, !text.isEmpty {
                 var replyToMessageId:MessageId?
                 if messageId.peerId.namespace != Namespaces.Peer.CloudUser {
                     replyToMessageId = messageId

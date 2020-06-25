@@ -8,10 +8,11 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 import Foundation
-import PostboxMac
-import TelegramCoreMac
+import Postbox
+import TelegramCore
+import SyncCore
 
 let mediaExts:[String] = ["png","jpg","jpeg","tiff","mp4","mov","avi", "gif"]
 let photoExts:[String] = ["png","jpg","jpeg","tiff"]
@@ -67,29 +68,42 @@ func selectFolder(for window:Window, completion:@escaping (String)->Void) {
     }
 }
 
-func savePanel(file:String, ext:String, for window:Window) {
+func savePanel(file:String, ext:String, for window:Window, defaultName: String? = nil, completion:((String?)->Void)? = nil) {
     
     let savePanel:NSSavePanel = NSSavePanel()
     let dateFormatter = DateFormatter()
     dateFormatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
-    savePanel.nameFieldStringValue = "\(dateFormatter.string(from: Date())).\(ext)"
+    savePanel.nameFieldStringValue = defaultName ?? "\(dateFormatter.string(from: Date())).\(ext)"
     
     let wLevel = window.level
-    if wLevel == .screenSaver {
+   // if wLevel == .screenSaver {
         window.level = .normal
-    }
+    //}
     
-    
-    savePanel.beginSheetModal(for: window, completionHandler: { [weak window] result in
-    
+    savePanel.begin { (result) in
         if result == NSApplication.ModalResponse.OK, let saveUrl = savePanel.url {
             try? FileManager.default.removeItem(atPath: saveUrl.path)
             try? FileManager.default.copyItem(atPath: file, toPath: saveUrl.path)
+            completion?(saveUrl.path)
+        } else {
+            completion?(nil)
         }
-        window?.level = wLevel
-    })
+        window.level = wLevel
+    }
     
+//    savePanel.beginSheetModal(for: window, completionHandler: { [weak window] result in
+//        if result == NSApplication.ModalResponse.OK, let saveUrl = savePanel.url {
+//            try? FileManager.default.removeItem(atPath: saveUrl.path)
+//            try? FileManager.default.copyItem(atPath: file, toPath: saveUrl.path)
+//            completion?(saveUrl.path)
+//        } else {
+//            completion?(nil)
+//        }
+//        window?.level = wLevel
+//    })
     
+//    
+//    
     if let editor = savePanel.fieldEditor(false, for: nil) {
         let exportFilename = savePanel.nameFieldStringValue
         let ext = exportFilename.nsstring.pathExtension
@@ -126,7 +140,7 @@ func savePanel(file:String, named:String, for window:Window) {
 
 
 
-func alert(for window:Window, header:String = appName, info:String?, completion: (()->Void)? = nil) {
+func alert(for window:Window, header:String = appName, info:String?, runModal: Bool = false, completion: (()->Void)? = nil) {
 //
 //    let alert = AlertController(window, header: header, text: info ?? "")
 //    alert.show(completionHandler: { response in
@@ -138,9 +152,23 @@ func alert(for window:Window, header:String = appName, info:String?, completion:
     alert.alertStyle = .informational
     alert.messageText = header
     alert.informativeText = info ?? ""
-    alert.beginSheetModal(for: window, completionHandler: { (_) in
-        completion?()
-    })
+    alert.addButton(withTitle: L10n.alertOK)
+    
+    
+    alert.addButton(withTitle: L10n.alertCancel)
+    alert.buttons.last?.wantsLayer = true
+    alert.buttons.last?.layer?.opacity = 0
+    alert.buttons.last?.keyEquivalent = "\u{1b}"
+    alert.buttons.last?.removeAllSubviews()
+    alert.buttons.last?.focusRingType = .none
+    if runModal {
+        alert.runModal()
+    } else {
+        alert.beginSheetModal(for: window, completionHandler: { (_) in
+            completion?()
+        })
+    }
+    
     
 }
 
@@ -162,7 +190,10 @@ func confirm(for window:Window, header: String? = nil, information:String?, okTi
     alert.messageText = header ?? appName
     alert.informativeText = information ?? ""
     alert.addButton(withTitle: okTitle ?? L10n.alertOK)
-    alert.addButton(withTitle: cancelTitle)
+    if !cancelTitle.isEmpty {
+        alert.addButton(withTitle: cancelTitle)
+        alert.buttons.last?.keyEquivalent = "\u{1b}"
+    }
     
 
     
@@ -180,6 +211,8 @@ func confirm(for window:Window, header: String? = nil, information:String?, okTi
             if response.rawValue == 1000 {
                 successHandler(.basic)
             } else if response.rawValue == 1002 {
+                successHandler(.thrid)
+            } else if response.rawValue == 1001, cancelTitle == "" {
                 successHandler(.thrid)
             }
         }

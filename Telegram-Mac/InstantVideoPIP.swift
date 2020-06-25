@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 enum InstantVideoPIPCornerAlignment {
     case topLeft
@@ -136,9 +137,9 @@ class InstantVideoPIP: GenericViewController<InstantVideoPIPView>, APDelegate {
         isShown = true
         genericView.player.animatesAlphaOnFirstTransition = false
         if let message = currentMessage, let media = message.media.first as? TelegramMediaFile {
-            let signal:Signal<(TransformImageArguments) -> DrawingContext?, NoError> = chatMessageVideo(postbox: context.account.postbox, fileReference: FileMediaReference.message(message: MessageReference(message), media: media), scale: view.backingScaleFactor)
+            let signal:Signal<ImageDataTransformation, NoError> = chatMessageVideo(postbox: context.account.postbox, fileReference: FileMediaReference.message(message: MessageReference(message), media: media), scale: view.backingScaleFactor)
             
-            genericView.update(with: FileMediaReference.message(message: MessageReference(message), media: media).resourceReference(media.resource), size: NSMakeSize(150, 150), viewSize: NSMakeSize(150, 150), file: media, context: context, table: nil, ignoreWindowKey: true, iconSignal: .complete())
+            genericView.update(with: FileMediaReference.message(message: MessageReference(message), media: media).resourceReference(media.resource), size: NSMakeSize(200, 200), viewSize: NSMakeSize(200, 200), file: media, context: context, table: nil, ignoreWindowKey: true, iconSignal: .complete())
         }
 
         if let contentView = window?.contentView, genericView.superview == nil {
@@ -306,7 +307,7 @@ class InstantVideoPIP: GenericViewController<InstantVideoPIPView>, APDelegate {
         if let msg = msg {
             if let currentMessage = currentMessage, !isShown && currentMessage.id != msg.id, CFAbsoluteTimeGetCurrent() - scrollTime > 1.0 {
                 if let item = tableView?.item(stableId: msg.chatStableId) {
-                    tableView?.scroll(to: .center(id: item.stableId, innerId: nil, animated: true, focus: false, inset: 0))
+                    tableView?.scroll(to: .center(id: item.stableId, innerId: nil, animated: true, focus: .init(focus: false), inset: 0))
                 }
             }
             

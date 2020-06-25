@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 import AVFoundation
 private class ConnectionStatusView : View {
     private var textViewLayout:TextViewLayout?
@@ -57,32 +58,26 @@ private class ConnectionStatusView : View {
             }
             textViewLayout = TextViewLayout(attr, maximumNumberOfLines: 1)
             needsLayout = true
-           // indicator.animates = true
         }
     }
     private let textView:TextView = TextView()
     private let indicator:ProgressIndicator = ProgressIndicator()
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-       // indicator.setFrameSize(18,18)
-//        indicator.numberOfLines = 8
-//        indicator.innerMargin = 3
-//        indicator.widthOfLine = 3
-//        indicator.lengthOfLine = 6
         textView.userInteractionEnabled = false
         textView.isSelectable = false
         addSubview(textView)
         addSubview(indicator)
         
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
         backgroundColor = theme.colors.background
         textView.backgroundColor = theme.colors.background
         disableProxyButton?.set(background: theme.colors.background, for: .Normal)
-        indicator.progressColor = theme.colors.indicatorColor
+        indicator.progressColor = theme.colors.text
         let status = self.status
         self.status = status
     }
@@ -107,8 +102,8 @@ private class ConnectionStatusView : View {
             textView.update(textViewLayout)
             
             if let disableProxyButton = disableProxyButton {
-                disableProxyButton.setFrameOrigin(indicator.frame.maxX + 2, floorToScreenPixels(scaleFactor: backingScaleFactor, frame.height / 2) + 2)
-                textView.setFrameOrigin(indicator.frame.maxX + 8, floorToScreenPixels(scaleFactor: backingScaleFactor, frame.height / 2) - textView.frame.height + 2)
+                disableProxyButton.setFrameOrigin(indicator.frame.maxX + 3, floorToScreenPixels(backingScaleFactor, frame.height / 2) + 2)
+                textView.setFrameOrigin(indicator.frame.maxX + 8, floorToScreenPixels(backingScaleFactor, frame.height / 2) - textView.frame.height + 2)
             } else {
                 textView.setFrameOrigin(NSMakePoint(indicator.frame.maxX + 4, f.origin.y))
             }
@@ -184,8 +179,8 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
     
     var inputActivities:(PeerId, [(Peer, PeerInputActivity)])? {
         didSet {
-            if let inputActivities = inputActivities  {
-                activities.update(with: inputActivities, for: max(frame.width - 80, 160), theme:theme.activity(key: 4, foregroundColor: theme.colors.blueUI, backgroundColor: theme.colors.background), layout: { [weak self] show in
+            if let inputActivities = inputActivities, self.chatInteraction.mode == .history  {
+                activities.update(with: inputActivities, for: max(frame.width - 80, 160), theme:theme.activity(key: 4, foregroundColor: theme.colors.accent, backgroundColor: theme.colors.background), layout: { [weak self] show in
                     guard let `self` = self else { return }
                     self.needsLayout = true
                     self.hiddenStatus = show
@@ -230,18 +225,13 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
         searchButton.disableActions()
         callButton.disableActions()
         
-        var layoutChanged:(()->Void)?
         
         badgeNode = GlobalBadgeNode(chatInteraction.context.account, sharedContext: chatInteraction.context.sharedContext, excludePeerId: self.chatInteraction.peerId, view: View(), layoutChanged: {
-            layoutChanged?()
         })
         
 
         super.init(controller: controller, textInset: 46)
         
-        layoutChanged = {
-            //self?.needsLayout = true
-        }
         addSubview(activities.view!)
 
         
@@ -272,12 +262,16 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
                     strongSelf.isSingleLayout = true
                     strongSelf.badgeNode.view?.isHidden = false
                     strongSelf.closeButton.isHidden = false
+                    strongSelf.searchButton.isHidden = false
+                    strongSelf.avatarControl.isHidden = false
                 default:
-                    strongSelf.isSingleLayout = strongSelf.controller is ChatAdditionController
+                    strongSelf.isSingleLayout = strongSelf.controller?.className != "Telegram.ChatController" //( is ChatAdditionController) || (strongSelf.controller is ChatSwitchInlineController) || (strongSelf.controller is ChatScheduleController)
                     strongSelf.badgeNode.view?.isHidden = true
-                    strongSelf.closeButton.isHidden = !(strongSelf.controller is ChatAdditionController)
+                    strongSelf.closeButton.isHidden = strongSelf.controller?.className == "Telegram.ChatController"
+                    strongSelf.searchButton.isHidden = strongSelf.controller is ChatScheduleController
+                    strongSelf.avatarControl.isHidden = strongSelf.controller is ChatScheduleController
                 }
-                strongSelf.textInset = strongSelf.isSingleLayout ? 66 : 46
+                strongSelf.textInset = strongSelf.avatarControl.isHidden ? 24 : strongSelf.isSingleLayout ? 66 : 46
                 strongSelf.needsLayout = true
             }
         }))
@@ -296,7 +290,7 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
 
         addSubview(badgeNode.view!)
         
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
         
         self.continuesAction = true
         
@@ -337,7 +331,7 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
         let point = convert(event.locationInWindow, from: nil)
 
         
-        if NSPointInRect(point, avatarControl.frame) {
+        if NSPointInRect(point, avatarControl.frame), chatInteraction.mode != .scheduled {
             if let peer = chatInteraction.peer, let large = peer.largeProfileImage {
                 showPhotosGallery(context: chatInteraction.context, peerId: chatInteraction.peerId, firstStableId: AnyHashable(large.resource.id.uniqueId), self, nil)
                 return
@@ -346,14 +340,17 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
         
         if isSingleLayout {
             if point.x > 20 {
-                if chatInteraction.peerId == chatInteraction.context.peerId {
-                    chatInteraction.context.sharedContext.bindings.rootNavigation().push(PeerMediaController(context: chatInteraction.context, peerId: chatInteraction.peerId, tagMask: .photoOrVideo))
-                } else {
-                    switch chatInteraction.chatLocation {
-                    case let .peer(peerId):
-                        chatInteraction.openInfo(peerId, false, nil, nil)
+                if chatInteraction.mode != .scheduled {
+                    if chatInteraction.peerId == chatInteraction.context.peerId {
+                        chatInteraction.context.sharedContext.bindings.rootNavigation().push(PeerMediaController(context: chatInteraction.context, peerId: chatInteraction.peerId, tagMask: .photoOrVideo))
+                    } else {
+                        switch chatInteraction.chatLocation {
+                        case let .peer(peerId):
+                            chatInteraction.openInfo(peerId, false, nil, nil)
+                        }
                     }
                 }
+               
             } else {
                 chatInteraction.context.sharedContext.bindings.rootNavigation().back()
             }
@@ -408,11 +405,17 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
         var shouldUpdateLayout = false
         if let peerView = self.postboxView as? PeerView {
             
-            if let peer = peerViewMainPeer(peerView) {
-                callButton.isHidden = !peer.canCall || chatInteraction.peerId == chatInteraction.context.peerId
-            } else {
+            switch chatInteraction.mode {
+            case .history:
+                if let peer = peerViewMainPeer(peerView) {
+                    callButton.isHidden = !peer.canCall || chatInteraction.peerId == chatInteraction.context.peerId
+                } else {
+                    callButton.isHidden = true
+                }
+            case .scheduled:
                 callButton.isHidden = true
             }
+            
             
             if let peer = peerViewMainPeer(peerView) {
                 if peer.id == chatInteraction.context.peerId {
@@ -423,7 +426,7 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
                     if let largeProfileImage = peer.largeProfileImage {
                        // let image = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [largeProfileImage], immediateThumbnailData: nil, reference: nil, partialReference: nil)
                         if let peerReference = PeerReference(peer) {
-                            fetchPeerAvatar.set(fetchedMediaResource(postbox: chatInteraction.context.account.postbox, reference: .avatar(peer: peerReference, resource: largeProfileImage.resource)).start())
+                            fetchPeerAvatar.set(fetchedMediaResource(mediaBox: chatInteraction.context.account.postbox.mediaBox, reference: .avatar(peer: peerReference, resource: largeProfileImage.resource)).start())
                         }
                       //  fetchPeerAvatar.set(chatMessagePhotoInteractiveFetched(account: chatInteraction.context.account, imageReference: ImageMediaReference.standalone(media: image), toRepresentationSize: NSMakeSize(640, 640)).start())
                     }
@@ -447,11 +450,19 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
             var result = stringStatus(for: peerView, context: chatInteraction.context, theme: PeerStatusStringTheme(titleFont: .medium(.title)), onlineMemberCount: self.onlineMemberCount)
             
             if chatInteraction.context.peerId == peerView.peerId  {
-                result = result.withUpdatedTitle(L10n.peerSavedMessages)
+                if chatInteraction.mode == .scheduled {
+                    result = result.withUpdatedTitle(L10n.chatTitleReminder)
+                } else {
+                    result = result.withUpdatedTitle(L10n.peerSavedMessages)
+                }
+            } else if chatInteraction.mode == .scheduled {
+                result = result.withUpdatedTitle(L10n.chatTitleScheduledMessages)
             }
+            
+            
             if chatInteraction.context.peerId == peerView.peerId {
                 status = nil
-            } else if status == nil || !status!.isEqual(to: result.status) || force {
+            } else if (status == nil || !status!.isEqual(to: result.status) || force) && chatInteraction.mode != .scheduled {
                 status = result.status
                 shouldUpdateLayout = true
             }
@@ -471,10 +482,13 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
     }
     
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
-        
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        let theme = (theme as! TelegramPresentationTheme)
         searchButton.set(image: theme.icons.chatSearch, for: .Normal)
+        searchButton.set(image: theme.icons.chatSearchActive, for: .Highlight)
+
+        
         _ = searchButton.sizeToFit()
         
         callButton.set(image: theme.icons.chatCall, for: .Normal)

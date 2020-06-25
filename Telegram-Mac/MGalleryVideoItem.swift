@@ -8,9 +8,10 @@
 
 import Cocoa
 
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
 import AVFoundation
 import AVKit
@@ -75,6 +76,7 @@ class MGalleryVideoItem: MGalleryItem {
         
         controller.play(startTime)
         controller.viewDidAppear(false)
+        self.startTime = 0
     }
     
     override var maxMagnify: CGFloat {
@@ -108,16 +110,39 @@ class MGalleryVideoItem: MGalleryItem {
     var media:TelegramMediaFile {
         return entry.file!
     }
+    private var examinatedSize: CGSize?
+    var dimensions: CGSize? {
+        
+        if let examinatedSize = examinatedSize {
+            return examinatedSize
+        }
+        if let dimensions = media.dimensions {
+            return dimensions.size
+        }
+        let linked = link(path: context.account.postbox.mediaBox.resourcePath(media.resource), ext: "mp4")
+        guard let path = linked else {
+            return media.dimensions?.size
+        }
+        
+        let url = URL(fileURLWithPath: path)
+        guard let track = AVURLAsset(url: url).tracks(withMediaType: .video).first else {
+            return media.dimensions?.size
+        }
+        try? FileManager.default.removeItem(at: url)
+        self.examinatedSize = track.naturalSize.applying(track.preferredTransform)
+        return examinatedSize
+        
+    }
     
     override var notFittedSize: NSSize {
-        if let size = media.dimensions {
+        if let size = dimensions {
             return size.fitted(pagerSize)
         }
         return pagerSize
     }
     
     override var sizeValue: NSSize {
-        if let size = media.dimensions {
+        if let size = dimensions {
             
             var pagerSize = self.pagerSize
             
@@ -146,17 +171,20 @@ class MGalleryVideoItem: MGalleryItem {
         controller.rewindForward()
     }
     
+    var isFullscreen: Bool {
+        return controller.isFullscreen
+    }
     
     
     override func request(immediately: Bool) {
 
         
-        let signal:Signal<(TransformImageArguments) -> DrawingContext?,NoError> = chatMessageVideo(postbox: context.account.postbox, fileReference: entry.fileReference(media), scale: System.backingScale, synchronousLoad: true)
+        let signal:Signal<ImageDataTransformation,NoError> = chatMessageVideo(postbox: context.account.postbox, fileReference: entry.fileReference(media), scale: System.backingScale, synchronousLoad: true)
         
         
-        let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: media.dimensions?.fitted(pagerSize) ?? sizeValue, boundingSize: sizeValue, intrinsicInsets: NSEdgeInsets(), resizeMode: .fill(.black))
-        let result = signal |> mapToThrottled { transform -> Signal<CGImage?, NoError> in
-            return .single(transform(arguments)?.generateImage())
+        let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: media.dimensions?.size.fitted(pagerSize) ?? sizeValue, boundingSize: sizeValue, intrinsicInsets: NSEdgeInsets(), resizeMode: .none)
+        let result = signal |> mapToThrottled { data -> Signal<CGImage?, NoError> in
+            return .single(data.execute(arguments, data.data)?.generateImage())
         }
         
         path.set(context.account.postbox.mediaBox.resourceData(media.resource) |> mapToSignal { (resource) -> Signal<String, NoError> in
@@ -166,7 +194,7 @@ class MGalleryVideoItem: MGalleryItem {
             return .never()
         })
         
-        self.image.set(media.previewRepresentations.isEmpty ? .single(.image(nil)) |> deliverOnMainQueue : result |> map { .image($0) } |> deliverOnMainQueue)
+        self.image.set(media.previewRepresentations.isEmpty ? .single(.image(nil, nil)) |> deliverOnMainQueue : result |> map { .image($0 != nil ? NSImage(cgImage: $0!, size: $0!.backingSize) : nil, nil) } |> deliverOnMainQueue)
         
         fetch()
     }

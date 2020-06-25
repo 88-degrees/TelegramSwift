@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 class ChannelDiscussionInputView: View {
     private let leftButton: TitleButton = TitleButton()
@@ -28,18 +29,18 @@ class ChannelDiscussionInputView: View {
     }
     
     func update(with chatInteraction: ChatInteraction, discussionGroupId: PeerId?, leftAction: String, rightAction: String) {
-        leftButton.style = ControlStyle(font: .normal(.title),foregroundColor: theme.colors.blueUI)
+        leftButton.style = ControlStyle(font: .normal(.title),foregroundColor: theme.colors.accent)
         leftButton.set(text: leftAction, for: .Normal)
         leftButton.set(background: theme.colors.grayBackground, for: .Highlight)
         
-        rightButton.style = ControlStyle(font: .normal(.title),foregroundColor: theme.colors.blueUI)
+        rightButton.style = ControlStyle(font: .normal(.title),foregroundColor: theme.colors.accent)
         rightButton.set(text: rightAction, for: .Normal)
         rightButton.set(background: theme.colors.grayBackground, for: .Highlight)
         
         
         leftButton.removeAllHandlers()
         leftButton.set(handler: { [weak chatInteraction] _ in
-            chatInteraction?.toggleNotifications()
+            chatInteraction?.toggleNotifications(nil)
         }, for: .Click)
         
         rightButton.removeAllHandlers()
@@ -53,7 +54,7 @@ class ChannelDiscussionInputView: View {
                 if let strongSelf = self {
                     let count = unreadView.count(for: .peer(discussionGroupId)) ?? 0
                     if count > 0 {
-                        strongSelf.badge = BadgeNode(.initialize(string: Int(count).prettyNumber, color: .white, font: .bold(.small)), theme.colors.blueUI)
+                        strongSelf.badge = BadgeNode(.initialize(string: Int(count).prettyNumber, color: .white, font: .bold(.small)), theme.colors.accent)
                         strongSelf.badge!.view = strongSelf.badgeView
                         strongSelf.badgeView.setFrameSize(strongSelf.badge!.size)
                         strongSelf.addSubview(strongSelf.badgeView)
@@ -70,11 +71,11 @@ class ChannelDiscussionInputView: View {
         }
     }
     
-    override func updateLocalizationAndTheme() {
-        super.updateLocalizationAndTheme()
-        leftButton.style = ControlStyle(font: .normal(.title),foregroundColor: theme.colors.blueUI)
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
+        leftButton.style = ControlStyle(font: .normal(.title),foregroundColor: theme.colors.accent)
         leftButton.set(background: theme.colors.grayBackground, for: .Highlight)
-        rightButton.style = ControlStyle(font: .normal(.title),foregroundColor: theme.colors.blueUI)
+        rightButton.style = ControlStyle(font: .normal(.title),foregroundColor: theme.colors.accent)
         rightButton.set(background: theme.colors.grayBackground, for: .Highlight)
         
     }

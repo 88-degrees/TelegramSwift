@@ -8,9 +8,10 @@
 
 import Cocoa
 
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
 import AVFoundation
 import AVKit
@@ -35,6 +36,8 @@ enum AVPlayerState : Equatable {
         case .paused:
             self = .paused(duration: duration)
         case .waitingToPlayAtSpecifiedRate:
+            self = .waiting
+        @unknown default:
             self = .waiting
         }
     }
@@ -62,9 +65,9 @@ private final class GAVPlayer : AVPlayer {
         }
         NotificationCenter.default.addObserver(self, selector: #selector(playerDidEnd(_:)), name: NSNotification.Name.AVPlayerItemDidPlayToEndTime, object: item)
         
-        item?.addObserver(self, forKeyPath: "playbackBufferEmpty", options: [.new, .initial], context: nil)
-        item?.addObserver(self, forKeyPath: "playbackLikelyToKeepUp", options: [.new, .initial], context: nil)
-        item?.addObserver(self, forKeyPath: "playbackBufferFull", options: [.new, .initial], context: nil)
+        item?.addObserver(self, forKeyPath: "playbackBufferEmpty", options: [.new], context: nil)
+        item?.addObserver(self, forKeyPath: "playbackLikelyToKeepUp", options: [.new], context: nil)
+        item?.addObserver(self, forKeyPath: "playbackBufferFull", options: [.new], context: nil)
     }
     
     override init() {
@@ -83,21 +86,10 @@ private final class GAVPlayer : AVPlayer {
             if #available(OSX 10.12, *) {
                 _playerState.set(AVPlayerState(self))
             }
-            //  Status is not unknown
-            
         }
         
-        if object is AVPlayerItem {
-            switch keyPath {
-            case "playbackBufferEmpty":
-                bufferingValue.set(true)
-            case "playbackLikelyToKeepUp":
-                 bufferingValue.set(false)
-            case "playbackBufferFull":
-                 bufferingValue.set(false)
-            default:
-                break
-            }
+        if let item = object as? AVPlayerItem {
+            bufferingValue.set(!item.isPlaybackLikelyToKeepUp)
         }
     }
     
@@ -385,10 +377,10 @@ class MGalleryExternalVideoItem: MGalleryItem {
         let webpage = entry.webpage!
 
         
-        let signal:Signal<(TransformImageArguments) -> DrawingContext?,NoError> = chatMessagePhoto(account: context.account, imageReference: ImageMediaReference.webPage(webPage: WebpageReference(webpage), media: _media), scale: System.backingScale)
+        let signal:Signal<ImageDataTransformation,NoError> = chatMessagePhoto(account: context.account, imageReference: ImageMediaReference.webPage(webPage: WebpageReference(webpage), media: _media), scale: System.backingScale)
         let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: sizeValue, boundingSize: sizeValue, intrinsicInsets: NSEdgeInsets())
-        let result = signal |> deliverOn(graphicsThreadPool) |> mapToThrottled { transform -> Signal<CGImage?, NoError> in
-            return .single(transform(arguments)?.generateImage())
+        let result = signal |> deliverOn(graphicsThreadPool) |> mapToThrottled { data -> Signal<CGImage?, NoError> in
+            return .single(data.execute(arguments, data.data)?.generateImage())
         }
         
         switch webpage.content {
@@ -405,7 +397,7 @@ class MGalleryExternalVideoItem: MGalleryItem {
             return .complete()
         } |> deliverOnMainQueue)
         
-        self.image.set(result |> map { .image($0) } |> deliverOnMainQueue)
+        self.image.set(result |> map { .image($0 != nil ? NSImage(cgImage: $0!, size: $0!.backingSize) : nil, nil) } |> deliverOnMainQueue)
         
         fetch()
     }

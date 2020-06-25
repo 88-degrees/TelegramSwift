@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 
 
 
@@ -94,7 +95,7 @@ class ChatMessageAccessoryView: Control {
         
         let animated = animated && self.isCompact != isCompact
         
-        let updatedText = TextViewLayout.init(.initialize(string: isStreamable ? text.components(separatedBy: ", ").joined(separator: "\n") : text, color: .white, font: .normal(10.0)), maximumNumberOfLines: isStreamable && !isCompact ? 2 : 1, truncationType: .end, alwaysStaticItems: true) //TextNode.layoutText(maybeNode: textNode, .initialize(string: isStreamable ? text.components(separatedBy: ", ").joined(separator: "\n") : text, color: .white, font: .normal(10.0)), nil, isStreamable && !isCompact ? 2 : 1, .end, NSMakeSize(maxWidth, 20), nil, false, .left)
+        let updatedText = TextViewLayout(.initialize(string: isStreamable ? text.components(separatedBy: ", ").joined(separator: "\n") : text, color: .white, font: .normal(10.0)), maximumNumberOfLines: isStreamable && !isCompact ? 2 : 1, truncationType: .end, alwaysStaticItems: true) //TextNode.layoutText(maybeNode: textNode, .initialize(string: isStreamable ? text.components(separatedBy: ", ").joined(separator: "\n") : text, color: .white, font: .normal(10.0)), nil, isStreamable && !isCompact ? 2 : 1, .end, NSMakeSize(maxWidth, 20), nil, false, .left)
         updatedText.measure(width: maxWidth)
         textView.update(updatedText)
         
@@ -197,11 +198,10 @@ class ChatMessageAccessoryView: Control {
         addSubview(progress)
         addSubview(download)
         addSubview(unread)
-        bufferingIndicator.alwaysAnimate = true
         bufferingIndicator.background = .clear
         bufferingIndicator.progressColor = .white
         bufferingIndicator.layer?.cornerRadius = bufferingIndicator.frame.height / 2
-        bufferingIndicator.lineWidth = 1.0
+//        bufferingIndicator.lineWidth = 1.0
         bufferingIndicator.isHidden = true
         progress.isHidden = true
         download.isHidden = true

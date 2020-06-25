@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
+import SwiftSignalKit
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 
 class ChannelIntroView : NSScrollView, AppearanceViewProtocol {
     let imageView:ImageView = ImageView()
@@ -26,18 +27,18 @@ class ChannelIntroView : NSScrollView, AppearanceViewProtocol {
         documentView?.addSubview(button)
 
         button.set(font: .medium(.title), for: .Normal)
-        updateLocalizationAndTheme()
+        updateLocalizationAndTheme(theme: theme)
         
     }
-    func updateLocalizationAndTheme() {
-        
+    func updateLocalizationAndTheme(theme: PresentationTheme) {
+        let theme = (theme as! TelegramPresentationTheme)
         imageView.image = theme.icons.channelIntro
         imageView.sizeToFit()
         
         
         button.set(text: L10n.channelIntroCreateChannel, for: .Normal)
 
-        button.set(color: theme.colors.blueUI, for: .Normal)
+        button.set(color: theme.colors.accent, for: .Normal)
         _ = button.sizeToFit()
         
         backgroundColor = theme.colors.background
